@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-10
+### Added
+- Premium redesign: Geist and Instrument Serif type, aurora background, glass panels, glossy 3D bubbles with depth, and company logos on white plates with a monogram fallback. (#12)
+- `/api/logo`: same-origin icon proxy. It uses fixed sources (DuckDuckGo, Google), checks type and size, caches for 30 days at the CDN, and never connects to sender hosts. Shared network guards moved to `api/_lib/net.ts`. (#12)
+- Colour classes (type, unread rate, last seen, can unsubscribe) with legends, and a filters panel (unsubscribable, unread %, volume, recency, Gmail tab). (#13)
+- Free placement: drag to pin anywhere, double-click to release, unpin all; Orbit / Clusters / Free layouts. Multi-select by Shift-click, lasso or presets; group drag; group bar to add to cleanup or pop all. (#14)
+
+### Changed
+- The PNG export bakes in computed colours, so colour modes and gradients render correctly in the image.
+
 ## [0.4.0] - 2026-10-10
 ### Added
 - Live physics map: a continuous d3-force simulation with idle drift, rendered by direct DOM updates. Drag and fling bubbles, burst-out entrance, hover wobble, and a pop-with-particles animation (with undo) when a sender is cleaned. Pauses in background tabs and respects reduced motion. (#7)
@@ -35,6 +45,7 @@ First working release: roadmap milestones v0.1–v0.3.
 ### Added
 - Initial repository scaffold: README (with architecture, roadmap and an LLM-handoff section), LICENSE, .gitignore, CONTRIBUTING, issue/PR templates, and wiki pages.
 
-[Unreleased]: https://github.com/Bosaj/inbox-bubble-map/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Bosaj/inbox-bubble-map/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Bosaj/inbox-bubble-map/releases/tag/v0.6.0
 [0.4.0]: https://github.com/Bosaj/inbox-bubble-map/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Bosaj/inbox-bubble-map/releases/tag/v0.3.0

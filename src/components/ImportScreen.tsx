@@ -38,7 +38,7 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
 
   return (
     <div
-      className={`min-h-dvh ${drag ? 'drop-active' : ''}`}
+      className={`aurora min-h-dvh ${drag ? 'drop-active' : ''}`}
       onDragOver={(e) => {
         e.preventDefault()
         setDrag(true)
@@ -57,9 +57,13 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
             <span className="size-12">
               <Logo />
             </span>
-            <span className="text-[15px] font-semibold tracking-tight">Inbox Bubble Map</span>
+            <span className="font-display text-[22px]">
+              Inbox <em className="text-accent">Bubble</em> Map
+            </span>
           </div>
-          <h1 className="text-[40px] font-semibold leading-[1.05] tracking-tight sm:text-[52px]">See who’s filling your inbox.</h1>
+          <h1 className="font-display text-[52px] leading-[0.98] sm:text-[72px]">
+            See who’s <em className="text-accent">filling</em> your inbox.
+          </h1>
           <p className="mt-4 max-w-md text-[17px] leading-relaxed text-ink-2">
             Every sender becomes a bubble: bigger means more mail, closer to you means more recent. Spot the newsletters you never open and unsubscribe in a click.
           </p>
@@ -83,7 +87,7 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
         </section>
 
         <section className="enter w-full lg:w-[440px]" style={{ animationDelay: '80ms' }}>
-          <div className="rounded-[28px] border border-line bg-surface p-5 shadow-pop sm:p-6">
+          <div className="glass rounded-[28px] border border-line p-5 sm:p-6">
             {progress ? (
               <div aria-live="polite" className="py-6">
                 <p className="text-[15px] font-semibold">{progress.label}</p>
