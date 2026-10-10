@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-11
+### Fixed
+- Gmail import no longer fails on large mailboxes. Gmail answers `403 rateLimitExceeded` once an app reads more than about 50 messages a second; requests are now paced (40/s), every worker pauses and slows down on a rate-limit answer, and a single message that keeps failing is skipped instead of aborting the import. (#23)
+- The map opens after the first ~200 Gmail messages and keeps growing while the rest load, with a live counter in the header. (#23)
+- The CSP now allows small font files that the build inlines as `data:` URIs (Arabic subsets were blocked).
+
 ## [0.7.0] - 2026-10-11
 ### Added
 - Read mail inside the app: the sender panel lists that sender's newest messages, and a reader shows them in a sandboxed iframe with its own CSP, so remote images, fonts, forms and scripts are blocked. Works for Gmail, Outlook, IMAP and the demo inbox. (#17)

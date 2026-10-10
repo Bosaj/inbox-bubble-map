@@ -87,6 +87,8 @@ export default function App() {
   const [groupAction, setGroupAction] = useState<{ action: BulkAction; keys: string[] } | null>(null)
   const [groupBusy, setGroupBusy] = useState(false)
   const [groupProgress, setGroupProgress] = useState<string | null>(null)
+  const [stream, setStream] = useState<{ done: number; total: number } | null>(null)
+  const streamRef = useRef<AbortController | null>(null)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const worker = useRef<Worker | null>(null)
@@ -191,14 +193,50 @@ export default function App() {
     [load, t],
   )
 
+  /** Gmail streams: the map opens after the first ~200 messages and keeps growing while the rest load. */
   const onGoogle = gmailClientId
-    ? (limit: number) =>
-        connect('Gmail', async () => {
+    ? async (limit: number) => {
+        setConnectError(null)
+        setConnecting(true)
+        streamRef.current?.abort()
+        const ctrl = new AbortController()
+        streamRef.current = ctrl
+        let shown = false
+        try {
           setProgress({ label: t.waitGoogle, done: 0, total: 1, messages: 0 })
           const token = await requestGmailToken(gmailClientId!)
-          const msgs = await fetchGmailMetadata(token, { limit, onProgress: (p) => setProgress({ label: t.readingGmail, done: p.done, total: p.total, messages: p.done }) })
-          return { msgs, box: gmailMailbox(token, gmailClientId!) }
-        })
+          const box = gmailMailbox(token, gmailClientId!)
+          const all = await fetchGmailMetadata(token, {
+            limit,
+            signal: ctrl.signal,
+            onProgress: (p) => (shown ? setStream(p) : setProgress({ label: t.readingGmail, done: p.done, total: p.total, messages: p.done })),
+            onChunk: (msgs, p) => {
+              if (ctrl.signal.aborted) return
+              if (!shown) {
+                shown = true
+                load(msgs, { kind: 'live', name: 'Gmail', count: msgs.length }, box)
+                setStream(p)
+                setConnecting(false)
+              } else setMessages((prev) => (prev ? [...prev, ...msgs] : msgs))
+            },
+          })
+          if (ctrl.signal.aborted) return
+          if (!all.length) throw new Error(t.emptyMailbox)
+          if (!shown) load(all, { kind: 'live', name: 'Gmail', count: all.length }, box)
+          setSource({ kind: 'live', name: 'Gmail', count: all.length })
+        } catch (err) {
+          if ((err as Error).name === 'AbortError' || ctrl.signal.aborted) return
+          if (shown) setNotice(t.stoppedAt(num(messagesRef.current.length), errorText(err, t)))
+          else {
+            setConnectError(errorText(err, t))
+            setProgress(null)
+          }
+        } finally {
+          setConnecting(false)
+          setStream(null)
+          if (streamRef.current === ctrl) streamRef.current = null
+        }
+      }
     : undefined
 
   const onMicrosoft = msClientId
@@ -383,7 +421,15 @@ export default function App() {
               <em className="text-accent">{t.brand.em}</em>
               {t.brand.after}
             </p>
-            <p className="truncate text-[12px] text-ink-3">{sourceText}</p>
+            <p className="truncate text-[12px] text-ink-3">
+              {stream ? (
+                <span role="status" className="tabular inline-flex items-center gap-1.5 text-accent">
+                  <span className="inline-block size-2 animate-pulse rounded-full bg-accent" /> {t.loadingMore(num(stream.done), num(stream.total))}
+                </span>
+              ) : (
+                sourceText
+              )}
+            </p>
           </div>
         </div>
         <dl className="tabular order-3 flex w-full gap-6 overflow-x-auto text-[13px] sm:order-none sm:w-auto">
@@ -438,6 +484,8 @@ export default function App() {
             size="sm"
             variant="ghost"
             onClick={() => {
+              streamRef.current?.abort()
+              setStream(null)
               setMessages(null)
               setMailbox(null)
             }}
