@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-10
+### Added
+- Live physics map: a continuous d3-force simulation with idle drift, rendered by direct DOM updates. Drag and fling bubbles, burst-out entrance, hover wobble, and a pop-with-particles animation (with undo) when a sender is cleaned. Pauses in background tabs and respects reduced motion. (#7)
+- Connect any provider. Microsoft sign-in for Outlook / Hotmail / Microsoft 365 (MSAL v5 popup, Graph Mail.ReadBasic, paging, header fallback). (#8) An IMAP header relay (`api/imap.ts`) with presets for Gmail, Yahoo, iCloud, AOL, GMX, Zoho, Fastmail and custom servers, plus per-provider app-password steps. (#4)
+- Relay hardening: TLS on port 993 only, a public-DNS SSRF guard with a pinned address, same-origin check, body limit, per-IP rate limit and failed-login lockout. No storage or logging.
+- Time range filter (30 days / 90 days / 1 year / all), insight tiles, and a 12-month activity chart per sender. (#9)
+- Export menu: CSV, Gmail filters (.xml), Sieve rules (.sieve) and the map as a PNG. (#10)
+
+### Changed
+- Import screen redesigned around provider tiles; the privacy notice now describes the relay.
+- The map toolbar is a single scrollable row on phones.
+
 ## [0.3.0] - 2026-10-10
 First working release: roadmap milestones v0.1–v0.3.
 
@@ -23,5 +35,6 @@ First working release: roadmap milestones v0.1–v0.3.
 ### Added
 - Initial repository scaffold: README (with architecture, roadmap and an LLM-handoff section), LICENSE, .gitignore, CONTRIBUTING, issue/PR templates, and wiki pages.
 
-[Unreleased]: https://github.com/Bosaj/inbox-bubble-map/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Bosaj/inbox-bubble-map/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Bosaj/inbox-bubble-map/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Bosaj/inbox-bubble-map/releases/tag/v0.3.0
