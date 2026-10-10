@@ -10,7 +10,7 @@ import { ConnectDialog, type ImapForm } from './components/ConnectDialog'
 import { Insights } from './components/Insights'
 import type { MessageMeta } from './lib/headers'
 import { demoMessages } from './lib/demo'
-import { fetchGmailMetadata, gmailClientId, gmailMailbox, requestGmailToken } from './lib/gmail'
+import { fetchGmailMetadata, gmailClientId, gmailMailbox, requestGmailToken, Throttle } from './lib/gmail'
 import { applyToMessages, cleanSender, demoMailbox, type MailAction, type Mailbox } from './lib/mailbox'
 import type { WorkerOut } from './lib/parse.worker'
 import { ImportScreen, type Progress } from './components/ImportScreen'
@@ -205,9 +205,12 @@ export default function App() {
         try {
           setProgress({ label: t.waitGoogle, done: 0, total: 1, messages: 0 })
           const token = await requestGmailToken(gmailClientId!)
-          const box = gmailMailbox(token, gmailClientId!)
+          // one throttle for the import and the sender panel, so both together stay under Gmail's limit
+          const throttle = new Throttle(30)
+          const box = gmailMailbox(token, gmailClientId!, fetch, throttle)
           const all = await fetchGmailMetadata(token, {
             limit,
+            throttle,
             signal: ctrl.signal,
             onProgress: (p) => (shown ? setStream(p) : setProgress({ label: t.readingGmail, done: p.done, total: p.total, messages: p.done })),
             onChunk: (msgs, p) => {

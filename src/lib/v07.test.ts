@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyToMessages, cleanSender, demoMailbox, parseMailto, readerDocument } from './mailbox'
-import { fetchGmailMetadata, findBodies, fromQuery, gmailMailbox, isRateLimit, metaFromGmail } from './gmail'
+import { fetchGmailMetadata, findBodies, fromQuery, gmailMailbox, isRateLimit, metaFromGmail, Throttle } from './gmail'
 import { fromFilter, outlookMailbox } from './outlook'
 import { imapMailbox } from './providers'
 import { demoMessages } from './demo'
@@ -272,5 +272,25 @@ describe('Gmail import under rate limits', () => {
     expect(isRateLimit(403, 'insufficientPermissions')).toBe(false)
     expect(isRateLimit(429)).toBe(true)
     expect(STRINGS.fr.errors.gmailRate).toBeTruthy()
+  })
+})
+
+describe('shared Gmail throttle', () => {
+  it('lets a click jump the queue and charges the background import instead', async () => {
+    const th = new Throttle(10, 2)
+    await th.take()
+    await th.take()
+    const t0 = Date.now()
+    await th.take(true) // urgent: no wait even with an empty bucket
+    expect(Date.now() - t0).toBeLessThan(30)
+    const t1 = Date.now()
+    await th.take() // background now waits for the debt to refill (~200 ms at 10/s)
+    expect(Date.now() - t1).toBeGreaterThanOrEqual(150)
+  })
+
+  it('slows down once per burst of rate-limit answers', () => {
+    const th = new Throttle(40)
+    for (let i = 0; i < 12; i++) th.penalize(10)
+    expect(th.perSecond).toBe(30)
   })
 })
