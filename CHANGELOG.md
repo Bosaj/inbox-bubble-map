@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-11
+### Fixed
+- Opening a sender while a Gmail import was still streaming hit `403 rateLimitExceeded`: the import and the sender panel had separate throttles, so together they went over Gmail's per-user limit. They now share one throttle; clicks jump the queue and the background import slows to make room. The import starts at 30 reads/s and slows down once per burst of rate-limit answers instead of once per failed request. (#25)
+
 ## [0.7.1] - 2026-10-11
 ### Fixed
 - Gmail import no longer fails on large mailboxes. Gmail answers `403 rateLimitExceeded` once an app reads more than about 50 messages a second; requests are now paced (40/s), every worker pauses and slows down on a rate-limit answer, and a single message that keeps failing is skipped instead of aborting the import. (#23)

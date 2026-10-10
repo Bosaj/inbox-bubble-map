@@ -116,13 +116,15 @@ export class Throttle {
   private tokens: number
   private last = Date.now()
   private pausedUntil = 0
+  private lastPenalty = 0
   constructor(
     public perSecond: number,
     private burst = perSecond,
   ) {
     this.tokens = burst
   }
-  async take(): Promise<void> {
+  /** `urgent` requests (the user clicked something) skip the queue; their cost slows the background import instead. */
+  async take(urgent = false): Promise<void> {
     for (;;) {
       const now = Date.now()
       if (now < this.pausedUntil) {
@@ -131,7 +133,7 @@ export class Throttle {
       }
       this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) / 1000) * this.perSecond)
       this.last = now
-      if (this.tokens >= 1) {
+      if (urgent || this.tokens >= 1) {
         this.tokens -= 1
         return
       }
@@ -140,14 +142,17 @@ export class Throttle {
   }
   /** Back off after a rate-limit answer and slow down for the rest of the run. */
   penalize(ms: number) {
-    this.pausedUntil = Math.max(this.pausedUntil, Date.now() + ms)
-    this.perSecond = Math.max(5, this.perSecond * 0.75)
-    this.tokens = 0
+    const now = Date.now()
+    this.pausedUntil = Math.max(this.pausedUntil, now + ms)
+    // many workers hit the limit at once: slow down once per burst, not once per failed request
+    if (now - this.lastPenalty > 2000) this.perSecond = Math.max(5, this.perSecond * 0.75)
+    this.lastPenalty = now
+    this.tokens = Math.min(this.tokens, 0)
   }
 }
 
-async function call<T>(url: string, token: string, f: Fetch, init: RequestInit = {}, throttle?: Throttle, attempt = 0): Promise<T> {
-  await throttle?.take()
+async function call<T>(url: string, token: string, f: Fetch, init: RequestInit = {}, throttle?: Throttle, attempt = 0, urgent = false): Promise<T> {
+  await throttle?.take(urgent)
   const res = await f(url, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'content-type': 'application/json' } : {}), ...init.headers } })
   if (res.status === 401) throw new AuthExpired()
   if (res.ok) {
@@ -166,7 +171,7 @@ async function call<T>(url: string, token: string, f: Fetch, init: RequestInit =
     const wait = (Number(res.headers.get('retry-after')) || 0) * 1000 || Math.min(16_000, 500 * 2 ** attempt) + Math.random() * 400
     if (throttle) throttle.penalize(wait)
     else await sleep(wait)
-    return call(url, token, f, init, throttle, attempt + 1)
+    return call(url, token, f, init, throttle, attempt + 1, urgent)
   }
   throw new GmailError(res.status, reason)
 }
@@ -188,7 +193,8 @@ export async function fetchGmailMetadata(
   {
     limit = 2000,
     concurrency = 12,
-    perSecond = 40,
+    perSecond = 30,
+    throttle: shared,
     onProgress,
     onChunk,
     chunkEvery = 1500,
@@ -198,6 +204,8 @@ export async function fetchGmailMetadata(
     limit?: number
     concurrency?: number
     perSecond?: number
+    /** Share one throttle with the mailbox so clicks during an import stay under Gmail's limit. */
+    throttle?: Throttle
     onProgress?: (p: FetchProgress) => void
     onChunk?: (msgs: MessageMeta[], p: FetchProgress) => void
     chunkEvery?: number
@@ -205,7 +213,7 @@ export async function fetchGmailMetadata(
     fetchImpl?: Fetch
   } = {},
 ): Promise<MessageMeta[]> {
-  const throttle = new Throttle(perSecond)
+  const throttle = shared ?? new Throttle(perSecond)
   const ids: string[] = []
   let pageToken: string | undefined
   do {
@@ -299,10 +307,9 @@ function base64UrlUtf8(s: string): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-export function gmailMailbox(initialToken: string, clientId: string, fetchImpl: Fetch = fetch): Mailbox {
+export function gmailMailbox(initialToken: string, clientId: string, fetchImpl: Fetch = fetch, throttle: Throttle = new Throttle(30)): Mailbox {
   let token = initialToken
-  const throttle = new Throttle(40)
-  const api = <T,>(path: string, init?: RequestInit) => call<T>(`${API}${path}`, token, fetchImpl, init, throttle)
+  const api = <T,>(path: string, init?: RequestInit) => call<T>(`${API}${path}`, token, fetchImpl, init, throttle, 0, true)
 
   const partText = async (id: string, part: GmailPart): Promise<string> => {
     let data = part.body?.data
