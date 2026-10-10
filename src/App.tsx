@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Download, FileCode2, Filter, Image as ImageIcon, Map as MapIcon, Moon, RotateCcw, Search, Sheet, Sun, SunMoon, Table2, Target, Undo2, X } from 'lucide-react'
+import { BoxSelect, ChevronDown, Download, FileCode2, Filter, Image as ImageIcon, Map as MapIcon, Moon, Palette, RotateCcw, Search, Sheet, SlidersHorizontal, Sun, SunMoon, Table2, Target, Undo2, X } from 'lucide-react'
+import { activeFilterCount, NO_FILTERS, passes, selectPreset, type ColorBy, type Filters, type LayoutMode } from './lib/display'
+import { DisplayMenu, FiltersMenu, GroupBar, Legend, SelectMenu } from './components/MapControls'
 import { aggregate, CATEGORIES, cleanupScore, inRange, insights, summarize, toCsv, toGmailFilters, toSieve, type Category, type GroupBy } from './lib/aggregate'
 import { fetchViaImap, type Provider } from './lib/providers'
 import { fetchOutlookMetadata, msClientId, requestOutlookToken } from './lib/outlook'
@@ -78,6 +80,15 @@ export default function App() {
   const [popping, setPopping] = useState<Set<string>>(new Set())
   const [toast, setToast] = useState<{ key: string; label: string } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [colorBy, setColorBy] = useState<ColorBy>('type')
+  const [layout, setLayout] = useState<LayoutMode>('orbit')
+  const [logos, setLogos] = useState(true)
+  const [multi, setMulti] = useState<Set<string>>(new Set())
+  const [tool, setTool] = useState<'pan' | 'select'>('pan')
+  const [unpinToken, setUnpinToken] = useState(0)
+  const [pinnedCount, setPinnedCount] = useState(0)
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS)
+  const [menu, setMenu] = useState<'display' | 'filters' | 'select' | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
   useEffect(() => {
@@ -170,6 +181,17 @@ export default function App() {
       return fetchViaImap({ host: f.host, email: f.email, password: f.password, limit: f.limit, mailbox: f.mailbox })
     })
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMulti(new Set())
+        setMenu(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const popSender = (key: string, label: string) => {
     setSelected(null)
     setPopping((p) => new Set(p).add(key))
@@ -200,7 +222,9 @@ export default function App() {
     for (const s of all) c[s.category]++
     return c
   }, [all])
-  const filtered = useMemo(() => all.filter((s) => cats.has(s.category) && !cleaned.has(s.key)), [all, cats, cleaned])
+  const refTime = useMemo(() => all.reduce((m, s) => Math.max(m, s.last), 0), [all])
+  const filtered = useMemo(() => all.filter((s) => cats.has(s.category) && !cleaned.has(s.key) && passes(s, filters, refTime)), [all, cats, cleaned, filters, refTime])
+  const gmailTabs = useMemo(() => [...new Set(all.map((s) => s.gmailCategory).filter((x): x is string => Boolean(x)))].sort(), [all])
   const stats = useMemo(() => insights(all.filter((s) => !cleaned.has(s.key)), cleanup), [all, cleaned, cleanup])
   const shown = useMemo(() => filtered.slice(0, topN), [filtered, topN])
   const q = query.trim().toLowerCase()
@@ -257,12 +281,14 @@ export default function App() {
   const tableRows = q ? filtered.filter((s) => matches?.has(s.key)) : filtered
 
   return (
-    <div className="flex min-h-dvh flex-col lg:h-dvh">
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line bg-surface px-4 py-3 sm:px-6">
+    <div className="aurora flex min-h-dvh flex-col lg:h-dvh">
+      <header className="glass relative z-20 flex flex-wrap items-center gap-x-6 gap-y-3 border-b border-line px-4 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
           <img src="/favicon.svg" alt="" className="size-9 rounded-xl" />
           <div className="min-w-0">
-            <p className="text-[14px] font-semibold leading-tight">Inbox Bubble Map</p>
+            <p className="font-display text-[22px] leading-none">
+              Inbox <em className="text-accent">Bubble</em> Map
+            </p>
             <p className="truncate text-[12px] text-ink-3">{source}</p>
           </div>
         </div>
@@ -323,7 +349,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto border-b border-line bg-surface px-4 py-2.5 [scrollbar-width:none] sm:px-6 lg:flex-wrap lg:overflow-visible">
+      <div className="glass relative z-10 flex flex-nowrap items-center gap-2 overflow-x-auto border-b border-line px-4 py-2.5 [scrollbar-width:none] sm:px-6 lg:flex-wrap lg:overflow-visible">
         <label className="relative flex min-w-[180px] flex-1 shrink-0 items-center sm:max-w-xs">
           <Search size={15} className="pointer-events-none absolute start-3 text-ink-3" />
           <span className="sr-only">Search senders</span>
@@ -369,6 +395,61 @@ export default function App() {
         </div>
 
         <div className="ms-auto flex shrink-0 items-center gap-2">
+          <div className="relative">
+            <button type="button" onClick={() => setMenu(menu === 'filters' ? null : 'filters')} aria-expanded={menu === 'filters'} className="press inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-line-strong px-3 text-[13px] font-medium hover:border-ink-3">
+              <SlidersHorizontal size={15} /> Filters
+              {activeFilterCount(filters) > 0 && <span className="tabular rounded-full bg-accent px-1.5 text-[11px] text-accent-ink">{activeFilterCount(filters)}</span>}
+            </button>
+            {menu === 'filters' && <FiltersMenu filters={filters} onChange={setFilters} tabs={gmailTabs} onClose={() => setMenu(null)} />}
+          </div>
+          {view === 'map' && (
+            <>
+              <div className="relative">
+                <button type="button" onClick={() => setMenu(menu === 'display' ? null : 'display')} aria-expanded={menu === 'display'} className="press inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-line-strong px-3 text-[13px] font-medium hover:border-ink-3">
+                  <Palette size={15} /> Display
+                </button>
+                {menu === 'display' && (
+                  <DisplayMenu
+                    colorBy={colorBy}
+                    onColorBy={setColorBy}
+                    layout={layout}
+                    onLayout={setLayout}
+                    logos={logos}
+                    onLogos={setLogos}
+                    pinned={pinnedCount}
+                    onUnpinAll={() => setUnpinToken((n) => n + 1)}
+                    onClose={() => setMenu(null)}
+                  />
+                )}
+              </div>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setMenu(menu === 'select' ? null : 'select')}
+                  aria-expanded={menu === 'select'}
+                  className={`press inline-flex min-h-10 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-medium ${tool === 'select' || multi.size ? 'border-accent bg-accent-soft' : 'border-line-strong hover:border-ink-3'}`}
+                >
+                  <BoxSelect size={15} /> Select{multi.size ? <span className="tabular rounded-full bg-accent px-1.5 text-[11px] text-accent-ink">{multi.size}</span> : null}
+                </button>
+                {menu === 'select' && (
+                  <SelectMenu
+                    tool={tool}
+                    onTool={(x) => {
+                      setTool(x)
+                      setMenu(null)
+                    }}
+                    onPreset={(preset) => {
+                      setMulti(selectPreset(shown, preset))
+                      setMenu(null)
+                    }}
+                    onClear={() => setMulti(new Set())}
+                    count={multi.size}
+                    onClose={() => setMenu(null)}
+                  />
+                )}
+              </div>
+            </>
+          )}
           <div role="radiogroup" aria-label="Group by" className="flex rounded-xl border border-line-strong p-0.5 text-[13px]">
             {(['domain', 'sender'] as const).map((g) => (
               <button key={g} type="button" role="radio" aria-checked={groupBy === g} onClick={() => setGroupBy(g)} className={`press min-h-9 rounded-lg px-3 font-medium ${groupBy === g ? 'bg-ink text-surface' : 'text-ink-2 hover:text-ink'}`}>
@@ -399,9 +480,46 @@ export default function App() {
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
-        <main className="relative h-[min(100vw,640px)] min-h-[380px] border-line bg-bg lg:h-auto lg:border-e">
+        <main className="relative h-[min(100vw,640px)] min-h-[380px] border-line lg:h-auto lg:border-e">
           {view === 'map' ? (
-            <BubbleMap senders={shown} selected={selected} onSelect={setSelected} matches={matches} popping={popping} svgRef={svgRef} />
+            <>
+              <BubbleMap
+                senders={shown}
+                selected={selected}
+                onSelect={setSelected}
+                matches={matches}
+                popping={popping}
+                svgRef={svgRef}
+                colorBy={colorBy}
+                layout={layout}
+                logos={logos}
+                multi={multi}
+                onMulti={setMulti}
+                tool={tool}
+                unpinToken={unpinToken}
+                onPinned={setPinnedCount}
+              />
+              <div className="glass pointer-events-none absolute bottom-3 start-3 max-w-[calc(100%-80px)] rounded-xl border border-line px-3 py-2 text-[11.5px] text-ink-2">
+                <Legend colorBy={colorBy} />
+                <p className="mt-1 hidden text-ink-3 sm:block">Size = messages{layout === 'orbit' ? ' · closer = more recent' : ''} · drag to pin · Shift-drag to select</p>
+              </div>
+              {multi.size > 0 && (
+                <GroupBar
+                  count={multi.size}
+                  onCleanup={() => {
+                    setCleanup((c) => new Set([...c, ...multi]))
+                    setTab('cleanup')
+                    setMulti(new Set())
+                  }}
+                  onPop={() => {
+                    const keys = [...multi]
+                    setMulti(new Set())
+                    keys.forEach((k, i) => setTimeout(() => popSender(k, keys.length > 1 ? `${keys.length} senders` : (all.find((x) => x.key === k)?.label ?? k)), i * 60))
+                  }}
+                  onClear={() => setMulti(new Set())}
+                />
+              )}
+            </>
           ) : (
             <div className="absolute inset-0 bg-surface">
               <SenderTable senders={tableRows} selected={selected} onSelect={setSelected} cleanup={cleanup} />
@@ -414,7 +532,7 @@ export default function App() {
           )}
         </main>
 
-        <aside className="min-h-0 overflow-y-auto bg-surface p-5">
+        <aside className="glass min-h-0 overflow-y-auto p-5">
           {selectedSender ? (
             <SenderDetail
               key={selectedSender.key}

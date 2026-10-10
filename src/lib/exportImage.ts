@@ -2,14 +2,27 @@
 export async function svgToPng(svg: SVGSVGElement, scale = 2): Promise<Blob> {
   const clone = svg.cloneNode(true) as SVGSVGElement
   const css = getComputedStyle(document.documentElement)
-  const resolve = (v: string | null) => (v && v.includes('var(') ? v.replace(/var\((--[\w-]+)\)/g, (_, name: string) => css.getPropertyValue(name).trim() || '#888') : v)
-  for (const el of [clone, ...clone.querySelectorAll<SVGElement>('*')]) {
-    for (const attr of ['fill', 'stroke']) {
-      const v = el.getAttribute(attr)
-      if (v) el.setAttribute(attr, resolve(v)!)
+  // walk the live tree and its clone together, baking computed colours into attributes
+  const live = [svg, ...svg.querySelectorAll<SVGElement>('*')]
+  const copy = [clone, ...clone.querySelectorAll<SVGElement>('*')]
+  live.forEach((el, i) => {
+    const c = copy[i]!
+    const cs = getComputedStyle(el)
+    if (el.tagName === 'stop') c.setAttribute('stop-color', cs.stopColor)
+    else {
+      if (el.getAttribute('fill') !== null || el.style.fill) {
+        const f = el.getAttribute('fill')
+        c.setAttribute('fill', f && f.startsWith('url(') ? f : cs.fill)
+      }
+      if (el.getAttribute('stroke') !== null) {
+        const st = el.getAttribute('stroke')
+        c.setAttribute('stroke', st && st.startsWith('url(') ? st : cs.stroke)
+      }
     }
-    el.removeAttribute('class') // no animations in the snapshot
-  }
+    c.removeAttribute('class') // no animations in the snapshot
+    c.removeAttribute('style')
+    if (el.tagName === 'image') c.remove() // cross-origin icons would taint the canvas
+  })
   const box = svg.viewBox.baseVal
   const size = 1200
   clone.setAttribute('width', String(size))

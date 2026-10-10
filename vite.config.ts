@@ -8,13 +8,17 @@ function devApi(): Plugin {
   return {
     name: 'dev-api',
     configureServer(server) {
-      server.middlewares.use('/api/imap', async (req, res) => {
+      server.middlewares.use(async (req, res, next) => {
+        const m = /^\/api\/([a-z-]+)(\?.*)?$/.exec(req.url ?? '')
+        if (!m) return next()
         const chunks: Buffer[] = []
         for await (const c of req) chunks.push(c as Buffer)
-        const mod = (await server.ssrLoadModule('/api/imap.ts')) as { POST: (r: Request) => Promise<Response> }
+        const mod = (await server.ssrLoadModule(`/api/${m[1]}.ts`)) as Record<string, (r: Request) => Promise<Response>>
+        const handler = mod[req.method ?? 'GET']
+        if (!handler) return next()
         const headers = new Headers()
         for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v)
-        const response = await mod.POST(new Request(`http://${req.headers.host}/api/imap`, { method: req.method, headers, body: req.method === 'POST' ? Buffer.concat(chunks) : undefined }))
+        const response = await handler(new Request(`http://${req.headers.host}${req.url}`, { method: req.method, headers, body: req.method === 'POST' ? Buffer.concat(chunks) : undefined }))
         res.statusCode = response.status
         response.headers.forEach((v, k) => res.setHeader(k, v))
         res.end(Buffer.from(await response.arrayBuffer()))
