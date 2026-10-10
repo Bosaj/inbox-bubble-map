@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
-import { ChevronDown, FileUp, Lock, Mail, Sparkles } from 'lucide-react'
+import { ChevronDown, FileUp, Lock, Sparkles } from 'lucide-react'
+import { PROVIDERS, type Provider } from '../lib/providers'
 import { Button, num } from './ui'
 
 export interface Progress {
@@ -12,7 +13,7 @@ export interface Progress {
 interface Props {
   onFiles: (files: File[]) => void
   onDemo: () => void
-  onGmail?: (limit: number) => void
+  onProvider: (p: Provider) => void
   progress: Progress | null
   error: string | null
 }
@@ -31,10 +32,9 @@ function Logo() {
   )
 }
 
-export function ImportScreen({ onFiles, onDemo, onGmail, progress, error }: Props) {
+export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
-  const [limit, setLimit] = useState(2000)
 
   return (
     <div
@@ -77,7 +77,7 @@ export function ImportScreen({ onFiles, onDemo, onGmail, progress, error }: Prop
           <p className="mt-8 flex max-w-md items-start gap-2.5 rounded-2xl border border-line bg-surface p-3.5 text-[13.5px] text-ink-2 shadow-card">
             <Lock size={16} className="mt-0.5 shrink-0 text-accent" />
             <span>
-              <strong className="font-semibold text-ink">Private by design.</strong> Everything runs in your browser. Only headers are read, nothing is uploaded, and nothing is saved when you close the tab.
+              <strong className="font-semibold text-ink">Private by design.</strong> Only headers are read, never message bodies, and nothing is saved when you close the tab. Files, Google and Microsoft sign-ins stay in your browser; app-password connections pass once through a relay that stores nothing.
             </span>
           </p>
         </section>
@@ -94,16 +94,41 @@ export function ImportScreen({ onFiles, onDemo, onGmail, progress, error }: Prop
               </div>
             ) : (
               <>
+                <p className="mb-3 text-[14px] font-semibold">Connect your inbox</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {PROVIDERS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => onProvider(p)}
+                      className="press flex min-h-12 items-center gap-2.5 rounded-2xl border border-line bg-surface-2 px-3 text-start hover:border-ink-3"
+                    >
+                      <span className="grid size-8 shrink-0 place-items-center rounded-xl text-[13px] font-bold text-white" style={{ background: p.color }}>
+                        {p.name.charAt(0)}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13.5px] font-semibold">{p.name}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="my-4 flex items-center gap-3 text-[12px] text-ink-3">
+                  <span className="h-px flex-1 bg-line" /> or use a file <span className="h-px flex-1 bg-line" />
+                </div>
+
                 <button
                   type="button"
                   onClick={() => input.current?.click()}
-                  className="press flex w-full flex-col items-center gap-3 rounded-[20px] border-2 border-dashed border-line-strong bg-surface-2 px-5 py-9 text-center hover:border-accent"
+                  className="press flex w-full items-center gap-3 rounded-[20px] border-2 border-dashed border-line-strong bg-surface-2 px-4 py-4 text-start hover:border-accent"
                 >
-                  <span className="grid size-12 place-items-center rounded-2xl bg-accent text-accent-ink shadow-card">
-                    <FileUp size={22} />
+                  <span className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent text-accent-ink shadow-card">
+                    <FileUp size={20} />
                   </span>
-                  <span className="text-[15px] font-semibold">Drop your Gmail export here</span>
-                  <span className="text-[13px] text-ink-3">.mbox from Google Takeout, or .eml files · or click to choose</span>
+                  <span>
+                    <span className="block text-[14px] font-semibold">Drop an export here</span>
+                    <span className="block text-[12.5px] text-ink-3">.mbox (Google Takeout, Thunderbird, Apple Mail) or .eml</span>
+                  </span>
                 </button>
                 <input
                   ref={input}
@@ -135,26 +160,7 @@ export function ImportScreen({ onFiles, onDemo, onGmail, progress, error }: Prop
                   </ol>
                 </details>
 
-                <div className="my-4 flex items-center gap-3 text-[12px] text-ink-3">
-                  <span className="h-px flex-1 bg-line" /> or <span className="h-px flex-1 bg-line" />
-                </div>
-
-                <div className="grid gap-2">
-                  {onGmail && (
-                    <div className="flex gap-2">
-                      <Button variant="secondary" className="flex-1" onClick={() => onGmail(limit)}>
-                        <Mail size={16} /> Connect Gmail (read-only)
-                      </Button>
-                      <label className="sr-only" htmlFor="limit">
-                        Messages to read
-                      </label>
-                      <select id="limit" value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="min-h-11 rounded-xl border border-line-strong bg-surface px-2 text-[13px]">
-                        <option value={500}>500</option>
-                        <option value={2000}>2,000</option>
-                        <option value={5000}>5,000</option>
-                      </select>
-                    </div>
-                  )}
+                <div className="mt-3 grid gap-2">
                   <Button variant="ghost" onClick={onDemo} className="border border-line">
                     <Sparkles size={16} className="text-accent" /> Explore a demo inbox
                   </Button>

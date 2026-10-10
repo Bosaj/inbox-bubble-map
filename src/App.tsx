@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Download, Map as MapIcon, Moon, RotateCcw, Search, Sun, SunMoon, Table2, Target, X } from 'lucide-react'
-import { aggregate, CATEGORIES, cleanupScore, summarize, toCsv, type Category, type GroupBy } from './lib/aggregate'
+import { ChevronDown, Download, FileCode2, Filter, Image as ImageIcon, Map as MapIcon, Moon, RotateCcw, Search, Sheet, Sun, SunMoon, Table2, Target, Undo2, X } from 'lucide-react'
+import { aggregate, CATEGORIES, cleanupScore, inRange, insights, summarize, toCsv, toGmailFilters, toSieve, type Category, type GroupBy } from './lib/aggregate'
+import { fetchViaImap, type Provider } from './lib/providers'
+import { fetchOutlookMetadata, msClientId, requestOutlookToken } from './lib/outlook'
+import { svgToPng } from './lib/exportImage'
+import { ConnectDialog, type ImapForm } from './components/ConnectDialog'
+import { Insights } from './components/Insights'
 import type { MessageMeta } from './lib/headers'
 import { demoMessages } from './lib/demo'
 import { fetchGmailMetadata, gmailClientId, requestGmailToken } from './lib/gmail'
@@ -34,9 +39,16 @@ function useTheme(): [Theme, () => void] {
   return [theme, () => setTheme((t) => NEXT_THEME[t])]
 }
 
-function download(name: string, text: string) {
+const RANGES: { days: number | null; label: string }[] = [
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+  { days: 365, label: '1 year' },
+  { days: null, label: 'All' },
+]
+
+function download(name: string, data: string | Blob, type = 'text/plain;charset=utf-8') {
   const a = document.createElement('a')
-  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }))
+  a.href = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type }))
   a.download = name
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 2000)
@@ -58,6 +70,21 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null)
   const [cleanup, setCleanup] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<'candidates' | 'cleanup'>('candidates')
+  const [range, setRange] = useState<number | null>(null)
+  const [provider, setProvider] = useState<Provider | null>(null)
+  const [connecting, setConnecting] = useState(false)
+  const [connectError, setConnectError] = useState<string | null>(null)
+  const [cleaned, setCleaned] = useState<Set<string>>(new Set())
+  const [popping, setPopping] = useState<Set<string>>(new Set())
+  const [toast, setToast] = useState<{ key: string; label: string } | null>(null)
+  const [exportOpen, setExportOpen] = useState(false)
+  const svgRef = useRef<SVGSVGElement>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const id = setTimeout(() => setToast(null), 5000)
+    return () => clearTimeout(id)
+  }, [toast])
 
   const load = useCallback((msgs: MessageMeta[], label: string) => {
     if (!msgs.length) {
@@ -71,6 +98,8 @@ export default function App() {
     setError(null)
     setSelected(null)
     setCleanup(new Set())
+    setCleaned(new Set())
+    setProvider(null)
   }, [])
 
   const onFiles = useCallback(
@@ -98,35 +127,81 @@ export default function App() {
     [load],
   )
 
-  const onGmail = useMemo(() => {
-    const clientId = gmailClientId
-    return clientId
-        ? async (limit: number) => {
-            setError(null)
-            try {
-              setProgress({ label: 'Waiting for Google sign-in…', done: 0, total: 1, messages: 0 })
-              const token = await requestGmailToken(clientId)
-              const msgs = await fetchGmailMetadata(token, {
-                limit,
-                onProgress: (p) => setProgress({ label: 'Reading message headers from Gmail…', done: p.done, total: p.total, messages: p.done }),
-              })
-              load(msgs, `Gmail · newest ${num(msgs.length)}`)
-            } catch (err) {
-              setError((err as Error).message)
-              setProgress(null)
-            }
-          }
-        : undefined
-  }, [load])
+  /** Shared wrapper for every live connection: progress, errors, load. */
+  const connect = useCallback(
+    async (label: string, run: () => Promise<MessageMeta[]>) => {
+      setConnectError(null)
+      setConnecting(true)
+      try {
+        const msgs = await run()
+        if (!msgs.length) throw new Error('That mailbox looks empty.')
+        load(msgs, `${label} · newest ${num(msgs.length)}`)
+      } catch (err) {
+        setConnectError((err as Error).message)
+        setProgress(null)
+      } finally {
+        setConnecting(false)
+      }
+    },
+    [load],
+  )
 
-  const all = useMemo(() => (messages ? aggregate(messages, groupBy) : []), [messages, groupBy])
+  const onGoogle = gmailClientId
+    ? (limit: number) =>
+        connect('Gmail', async () => {
+          setProgress({ label: 'Waiting for Google sign-in…', done: 0, total: 1, messages: 0 })
+          const token = await requestGmailToken(gmailClientId!)
+          return fetchGmailMetadata(token, { limit, onProgress: (p) => setProgress({ label: 'Reading headers from Gmail…', done: p.done, total: p.total, messages: p.done }) })
+        })
+    : undefined
+
+  const onMicrosoft = msClientId
+    ? (limit: number) =>
+        connect('Outlook', async () => {
+          setProgress({ label: 'Waiting for Microsoft sign-in…', done: 0, total: 1, messages: 0 })
+          const token = await requestOutlookToken(msClientId!)
+          return fetchOutlookMetadata(token, { limit, onProgress: (p) => setProgress({ label: 'Reading headers from Outlook…', done: p.done, total: p.total, messages: p.done }) })
+        })
+    : undefined
+
+  const onImap = (f: ImapForm) =>
+    connect(provider?.name ?? f.host, async () => {
+      setProgress({ label: `Reading headers from ${f.host}…`, done: 0, total: 1, messages: 0 })
+      return fetchViaImap({ host: f.host, email: f.email, password: f.password, limit: f.limit, mailbox: f.mailbox })
+    })
+
+  const popSender = (key: string, label: string) => {
+    setSelected(null)
+    setPopping((p) => new Set(p).add(key))
+    setTimeout(() => {
+      setPopping((p) => {
+        const n = new Set(p)
+        n.delete(key)
+        return n
+      })
+      setCleaned((c) => new Set(c).add(key))
+      setToast({ key, label })
+    }, 460)
+  }
+  const undoPop = (key: string) => {
+    setCleaned((c) => {
+      const n = new Set(c)
+      n.delete(key)
+      return n
+    })
+    setToast(null)
+  }
+
+  const scoped = useMemo(() => (messages ? inRange(messages, range) : []), [messages, range])
+  const all = useMemo(() => aggregate(scoped, groupBy), [scoped, groupBy])
   const summary = useMemo(() => summarize(all), [all])
   const counts = useMemo(() => {
     const c: Record<Category, number> = { bulk: 0, automated: 0, people: 0 }
     for (const s of all) c[s.category]++
     return c
   }, [all])
-  const filtered = useMemo(() => all.filter((s) => cats.has(s.category)), [all, cats])
+  const filtered = useMemo(() => all.filter((s) => cats.has(s.category) && !cleaned.has(s.key)), [all, cats, cleaned])
+  const stats = useMemo(() => insights(all.filter((s) => !cleaned.has(s.key)), cleanup), [all, cleaned, cleanup])
   const shown = useMemo(() => filtered.slice(0, topN), [filtered, topN])
   const q = query.trim().toLowerCase()
   const matches = useMemo(
@@ -154,7 +229,29 @@ export default function App() {
     })
 
   if (!messages) {
-    return <ImportScreen onFiles={onFiles} onDemo={() => load(demoMessages(), 'Demo inbox')} onGmail={onGmail} progress={progress} error={error} />
+    return (
+      <>
+        <ImportScreen
+          onFiles={onFiles}
+          onDemo={() => load(demoMessages(), 'Demo inbox')}
+          onProvider={(p) => {
+            setConnectError(null)
+            setProvider(p)
+          }}
+          progress={connecting ? null : progress}
+          error={error}
+        />
+        <ConnectDialog
+          provider={provider}
+          onClose={() => !connecting && setProvider(null)}
+          onImap={onImap}
+          onGoogle={onGoogle}
+          onMicrosoft={onMicrosoft}
+          busy={connecting}
+          error={connectError ?? (connecting && progress ? `${progress.label} ${progress.messages ? `${num(progress.messages)} so far` : ''}` : null)}
+        />
+      </>
+    )
   }
 
   const tableRows = q ? filtered.filter((s) => matches?.has(s.key)) : filtered
@@ -184,9 +281,39 @@ export default function App() {
           ))}
         </dl>
         <div className="ms-auto flex items-center gap-1.5">
-          <Button size="sm" variant="ghost" onClick={() => download('inbox-cleanup.csv', toCsv(cleanupList.length ? cleanupList : filtered))} title={cleanupList.length ? 'Export your cleanup list' : 'Export all shown senders'}>
-            <Download size={15} /> <span className="hidden sm:inline">Export CSV</span>
-          </Button>
+          <div className="relative">
+            <Button size="sm" variant="ghost" onClick={() => setExportOpen((v) => !v)} aria-expanded={exportOpen} aria-haspopup="menu">
+              <Download size={15} /> <span className="hidden sm:inline">Export</span> <ChevronDown size={14} />
+            </Button>
+            {exportOpen && (
+              <div role="menu" className="enter absolute end-0 top-11 z-30 w-72 rounded-2xl border border-line bg-surface p-1.5 shadow-pop" onMouseLeave={() => setExportOpen(false)}>
+                {[
+                  { icon: <Sheet size={15} />, label: 'Spreadsheet (CSV)', hint: cleanupList.length ? 'Your cleanup list' : 'All shown senders', disabled: false, run: () => download('inbox-senders.csv', toCsv(cleanupList.length ? cleanupList : filtered), 'text/csv;charset=utf-8') },
+                  { icon: <Filter size={15} />, label: 'Gmail filters (.xml)', hint: 'Skip inbox + mark read for your cleanup list', disabled: !cleanupList.length, run: () => download('gmail-filters.xml', toGmailFilters(cleanupList), 'application/xml') },
+                  { icon: <FileCode2 size={15} />, label: 'Sieve rules (.sieve)', hint: 'Fastmail, Proton, Posteo, cPanel…', disabled: !cleanupList.length, run: () => download('cleanup.sieve', toSieve(cleanupList)) },
+                  { icon: <ImageIcon size={15} />, label: 'Map image (.png)', hint: view === 'map' ? 'Share your bubble map' : 'Switch to the map view first', disabled: view !== 'map', run: async () => { if (svgRef.current) download('inbox-bubble-map.png', await svgToPng(svgRef.current)) } },
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    role="menuitem"
+                    disabled={item.disabled}
+                    onClick={() => {
+                      setExportOpen(false)
+                      void item.run()
+                    }}
+                    className="flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-start hover:bg-surface-2 disabled:opacity-45"
+                  >
+                    <span className="mt-0.5 text-accent">{item.icon}</span>
+                    <span>
+                      <span className="block text-[13.5px] font-medium">{item.label}</span>
+                      <span className="block text-[12px] text-ink-3">{item.disabled && item.label.startsWith('Gmail') || item.disabled && item.label.startsWith('Sieve') ? 'Add senders to your cleanup list first' : item.hint}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <Button size="sm" variant="ghost" onClick={() => setMessages(null)} title="Import another inbox">
             <RotateCcw size={15} /> <span className="hidden sm:inline">New import</span>
           </Button>
@@ -196,8 +323,8 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-4 py-2.5 sm:px-6">
-        <label className="relative flex min-w-[200px] flex-1 items-center sm:max-w-xs">
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto border-b border-line bg-surface px-4 py-2.5 [scrollbar-width:none] sm:px-6 lg:flex-wrap lg:overflow-visible">
+        <label className="relative flex min-w-[180px] flex-1 shrink-0 items-center sm:max-w-xs">
           <Search size={15} className="pointer-events-none absolute start-3 text-ink-3" />
           <span className="sr-only">Search senders</span>
           <input
@@ -213,7 +340,15 @@ export default function App() {
           )}
         </label>
 
-        <div role="group" aria-label="Filter by type (legend)" className="flex flex-wrap gap-1.5">
+        <div role="radiogroup" aria-label="Time range" className="flex shrink-0 rounded-xl border border-line-strong p-0.5 text-[13px]">
+          {RANGES.map((r) => (
+            <button key={r.label} type="button" role="radio" aria-checked={range === r.days} onClick={() => setRange(r.days)} className={`press min-h-9 rounded-lg px-2.5 font-medium ${range === r.days ? 'bg-ink text-surface' : 'text-ink-2 hover:text-ink'}`}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        <div role="group" aria-label="Filter by type (legend)" className="flex shrink-0 gap-1.5 lg:flex-wrap">
           {CATEGORIES.map((c) => {
             const on = cats.has(c)
             return (
@@ -233,7 +368,7 @@ export default function App() {
           })}
         </div>
 
-        <div className="ms-auto flex flex-wrap items-center gap-2">
+        <div className="ms-auto flex shrink-0 items-center gap-2">
           <div role="radiogroup" aria-label="Group by" className="flex rounded-xl border border-line-strong p-0.5 text-[13px]">
             {(['domain', 'sender'] as const).map((g) => (
               <button key={g} type="button" role="radio" aria-checked={groupBy === g} onClick={() => setGroupBy(g)} className={`press min-h-9 rounded-lg px-3 font-medium ${groupBy === g ? 'bg-ink text-surface' : 'text-ink-2 hover:text-ink'}`}>
@@ -266,7 +401,7 @@ export default function App() {
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
         <main className="relative h-[min(100vw,640px)] min-h-[380px] border-line bg-bg lg:h-auto lg:border-e">
           {view === 'map' ? (
-            <BubbleMap senders={shown} selected={selected} onSelect={setSelected} matches={matches} layoutKey={`${source}|${groupBy}`} />
+            <BubbleMap senders={shown} selected={selected} onSelect={setSelected} matches={matches} popping={popping} svgRef={svgRef} />
           ) : (
             <div className="absolute inset-0 bg-surface">
               <SenderTable senders={tableRows} selected={selected} onSelect={setSelected} cleanup={cleanup} />
@@ -281,9 +416,18 @@ export default function App() {
 
         <aside className="min-h-0 overflow-y-auto bg-surface p-5">
           {selectedSender ? (
-            <SenderDetail key={selectedSender.key} sender={selectedSender} inCleanup={cleanup.has(selectedSender.key)} onToggleCleanup={() => toggleCleanup(selectedSender.key)} onBack={() => setSelected(null)} />
+            <SenderDetail
+              key={selectedSender.key}
+              sender={selectedSender}
+              inCleanup={cleanup.has(selectedSender.key)}
+              onToggleCleanup={() => toggleCleanup(selectedSender.key)}
+              onCleaned={() => popSender(selectedSender.key, selectedSender.label)}
+              onBack={() => setSelected(null)}
+              refTime={summary.to || Date.now()}
+            />
           ) : (
             <>
+              <Insights data={stats} cleaned={cleaned.size} onSelect={(x) => setSelected(x.key)} />
               <div role="tablist" aria-label="Panel" className="mb-4 flex rounded-xl bg-surface-2 p-1 text-[13px]">
                 <button type="button" role="tab" aria-selected={tab === 'candidates'} onClick={() => setTab('candidates')} className={`press min-h-9 flex-1 rounded-lg font-medium ${tab === 'candidates' ? 'bg-surface text-ink shadow-card' : 'text-ink-2'}`}>
                   Top cleanup picks
@@ -321,6 +465,17 @@ export default function App() {
           )}
         </aside>
       </div>
+      {toast && (
+        <div role="status" className="enter fixed inset-x-0 bottom-5 z-40 mx-auto flex w-fit max-w-[calc(100vw-24px)] items-center gap-3 rounded-2xl bg-ink px-4 py-2.5 text-[13.5px] text-surface shadow-pop">
+          <span className="truncate">Popped {toast.label} 🎉</span>
+          <button type="button" onClick={() => undoPop(toast.key)} className="press inline-flex min-h-9 items-center gap-1 rounded-lg px-2 font-semibold text-[var(--c-people)] hover:bg-white/10">
+            <Undo2 size={14} /> Undo
+          </button>
+          <button type="button" aria-label="Dismiss" onClick={() => setToast(null)} className="press grid size-8 place-items-center rounded-lg opacity-70 hover:opacity-100">
+            <X size={14} />
+          </button>
+        </div>
+      )}
     </div>
   )
 }
