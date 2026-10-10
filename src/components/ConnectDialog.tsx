@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, ExternalLink, Eye, EyeOff, KeyRound, Lock, ShieldCheck, X } from 'lucide-react'
 import type { Provider } from '../lib/providers'
 import { Button } from './ui'
+import { useI18n } from '../i18n'
+import { GMAIL_SCOPE } from '../lib/gmail'
+import { MS_SCOPES } from '../lib/outlook'
 
 export interface ImapForm {
   host: string
@@ -24,6 +27,7 @@ interface Props {
 const LIMITS = [500, 2000, 5000]
 
 export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft, busy, error }: Props) {
+  const { t, lang } = useI18n()
   const ref = useRef<HTMLDialogElement>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -50,6 +54,8 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
   if (!provider) return <dialog ref={ref} onClose={onClose} />
 
   const oauth = provider.id === 'gmail' ? onGoogle : provider.id === 'outlook' ? onMicrosoft : undefined
+  const name = t.providerName[provider.id] ?? provider.name
+  const steps = t.providerSteps[provider.id]
   const showForm = provider.id !== 'outlook' && (!oauth || appPassword)
 
   return (
@@ -68,22 +74,22 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
             </span>
             <div>
               <h2 id="connect-title" className="text-[18px] font-semibold leading-tight">
-                Connect {provider.name}
+                {t.connect(name)}
               </h2>
-              <p className="text-[13px] text-ink-3">{provider.hint}</p>
+              <p className="text-[13px] text-ink-3">{t.providerHint[provider.id]}</p>
             </div>
           </div>
-          <button type="button" aria-label="Close" onClick={onClose} disabled={busy} className="press grid size-10 place-items-center rounded-xl text-ink-2 hover:bg-surface-2">
+          <button type="button" aria-label={t.close} onClick={onClose} disabled={busy} className="press grid size-10 place-items-center rounded-xl text-ink-2 hover:bg-surface-2">
             <X size={18} />
           </button>
         </div>
 
         <label className="mb-4 flex items-center justify-between gap-3 text-[13px] text-ink-2">
-          Messages to read (newest first)
+          {t.limit}
           <select value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="min-h-10 rounded-xl border border-line-strong bg-surface px-2 text-[13px] text-ink">
             {LIMITS.map((l) => (
               <option key={l} value={l}>
-                {l.toLocaleString('en-US')}
+                {l.toLocaleString(lang === 'ar' ? 'ar-MA-u-nu-latn' : lang)}
               </option>
             ))}
           </select>
@@ -92,15 +98,15 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
         {oauth && !appPassword && (
           <div className="space-y-3">
             <Button variant="primary" className="w-full" disabled={busy} onClick={() => oauth(limit)}>
-              <ShieldCheck size={16} /> Sign in with {provider.id === 'gmail' ? 'Google' : 'Microsoft'}
+              <ShieldCheck size={16} /> {t.signInWith(provider.id === 'gmail' ? 'Google' : 'Microsoft')}
             </Button>
             <p className="flex items-start gap-2 text-[12.5px] text-ink-3">
               <Lock size={14} className="mt-0.5 shrink-0" />
-              Read-only access to message headers ({provider.id === 'gmail' ? 'gmail.metadata' : 'Mail.ReadBasic'}): never bodies or attachments. The token stays in this tab.
+              {t.oauthNote(provider.id === 'gmail' ? GMAIL_SCOPE.split('/').pop()! : MS_SCOPES.join(', '))}
             </p>
             {provider.id === 'gmail' && (
               <button type="button" onClick={() => setAppPassword(true)} className="text-[13px] font-medium text-accent hover:underline">
-                Use an app password instead
+                {t.useAppPassword}
               </button>
             )}
           </div>
@@ -109,18 +115,18 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
         {provider.id === 'outlook' && !oauth && (
           <div className="space-y-3 rounded-2xl border border-line bg-surface-2 p-4 text-[13.5px] text-ink-2">
             <p>
-              <strong className="text-ink">Microsoft sign-in isn’t switched on for this site yet.</strong> Outlook.com no longer accepts app passwords over IMAP, so for now export your mail:
+              <strong className="text-ink">{t.outlookOffTitle}</strong> {t.outlookOff}
             </p>
             <ol className="list-decimal space-y-1 ps-5">
-              <li>
-                Install{' '}
-                <a className="font-medium text-accent hover:underline" href="https://www.thunderbird.net" target="_blank" rel="noreferrer">
-                  Thunderbird
-                </a>{' '}
-                and add your Outlook account (it uses Microsoft sign-in).
-              </li>
-              <li>Add the free “ImportExportTools NG” add-on.</li>
-              <li>Right-click Inbox → ImportExportTools NG → Export folder → mbox, then drop the file here.</li>
+              {t.outlookSteps.map((step, i) => (
+                <li key={i}>
+                  {step(
+                    <a className="font-medium text-accent hover:underline" href="https://www.thunderbird.net" target="_blank" rel="noreferrer">
+                      Thunderbird
+                    </a>,
+                  )}
+                </li>
+              ))}
             </ol>
           </div>
         )}
@@ -133,21 +139,21 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
               onImap({ host: host.trim(), email: email.trim(), password, mailbox, limit })
             }}
           >
-            {(provider.appPasswordSteps || provider.appPasswordUrl) && (
+            {(steps || provider.appPasswordUrl) && (
               <div className="flex items-start gap-2.5 rounded-2xl bg-accent-soft p-3 text-[13px]">
                 <KeyRound size={16} className="mt-0.5 shrink-0 text-accent" />
                 <p>
-                  {provider.appPasswordSteps}{' '}
+                  {steps}{' '}
                   {provider.appPasswordUrl && (
                     <a href={provider.appPasswordUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-accent hover:underline">
-                      Create one <ExternalLink size={12} />
+                      {t.createOne} <ExternalLink size={12} />
                     </a>
                   )}
                 </p>
               </div>
             )}
             <label className="block">
-              <span className="mb-1 block text-[12.5px] font-medium text-ink-2">Email address</span>
+              <span className="mb-1 block text-[12.5px] font-medium text-ink-2">{t.email}</span>
               <input
                 type="email"
                 required
@@ -158,7 +164,7 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-[12.5px] font-medium text-ink-2">App password</span>
+              <span className="mb-1 block text-[12.5px] font-medium text-ink-2">{t.appPassword}</span>
               <span className="relative block">
                 <input
                   type={show ? 'text' : 'password'}
@@ -168,18 +174,18 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
                   onChange={(e) => setPassword(e.target.value)}
                   className="min-h-11 w-full rounded-xl border border-line-strong bg-surface-2 ps-3 pe-11 text-[14px] outline-none focus:border-accent"
                 />
-                <button type="button" aria-label={show ? 'Hide password' : 'Show password'} onClick={() => setShow((v) => !v)} className="absolute end-1 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-ink-3 hover:text-ink">
+                <button type="button" aria-label={show ? t.hidePassword : t.showPassword} onClick={() => setShow((v) => !v)} className="absolute end-1 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-lg text-ink-3 hover:text-ink">
                   {show ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </span>
             </label>
             <details className="group" open={provider.id === 'other'}>
               <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 text-[13px] font-medium text-ink-2 hover:text-ink">
-                <ChevronDown size={15} className="transition-transform group-open:rotate-180" /> Server and folder
+                <ChevronDown size={15} className="transition-transform group-open:rotate-180" /> {t.serverFolder}
               </summary>
               <div className="mt-2 grid gap-3 sm:grid-cols-2">
                 <label className="block">
-                  <span className="mb-1 block text-[12.5px] font-medium text-ink-2">IMAP server (SSL, port 993)</span>
+                  <span className="mb-1 block text-[12.5px] font-medium text-ink-2">{t.imapServer}</span>
                   <input
                     required
                     value={host}
@@ -189,12 +195,12 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-1 block text-[12.5px] font-medium text-ink-2">Folder</span>
+                  <span className="mb-1 block text-[12.5px] font-medium text-ink-2">{t.folder}</span>
                   {provider.mailboxes ? (
                     <select value={mailbox} onChange={(e) => setMailbox(e.target.value)} className="min-h-11 w-full rounded-xl border border-line-strong bg-surface-2 px-2 text-[14px]">
                       {provider.mailboxes.map((m) => (
                         <option key={m.value} value={m.value}>
-                          {m.label}
+                          {t.folders[m.value] ?? m.label}
                         </option>
                       ))}
                     </select>
@@ -206,12 +212,10 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
             </details>
             <p className="flex items-start gap-2 rounded-2xl border border-line p-3 text-[12.5px] text-ink-2">
               <Lock size={14} className="mt-0.5 shrink-0 text-accent" />
-              <span>
-                Browsers can’t speak IMAP, so this one request goes over HTTPS to this site’s relay. The relay reads <strong className="text-ink">headers only</strong>, returns them and disconnects. Your password is never stored or logged. Revoke the app password whenever you like.
-              </span>
+              <span>{t.relayNote((x) => <strong className="text-ink">{x}</strong>)}</span>
             </p>
             <Button type="submit" variant="primary" className="w-full" disabled={busy}>
-              {busy ? 'Connecting…' : 'Connect and build my map'}
+              {busy ? t.connecting : t.connectBuild}
             </Button>
           </form>
         )}

@@ -1,6 +1,7 @@
 /** Header-level helpers shared by the mbox parser and the Gmail API client. */
 
 export interface MessageMeta {
+  id?: string // provider message id (Gmail id, Graph id, IMAP uid) when read from a live mailbox
   fromName: string
   fromEmail: string
   date: number // epoch ms, 0 if unknown

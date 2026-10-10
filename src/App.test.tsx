@@ -1,7 +1,12 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
+
+beforeEach(() => {
+  localStorage.clear()
+  document.documentElement.dir = 'ltr'
+})
 
 async function openDemo() {
   render(<App />)
@@ -25,8 +30,7 @@ describe('App', () => {
   it('shows sender details with unsubscribe actions and builds a cleanup list', async () => {
     await openDemo()
     await userEvent.click(screen.getAllByRole('button', { name: /Souk Deals/ })[0]!)
-    expect(screen.getByRole('link', { name: /^Unsubscribe$/ })).toHaveAttribute('href', expect.stringMatching(/^https:\/\//))
-    expect(screen.getByRole('link', { name: /Find in Gmail/ })).toHaveAttribute('href', expect.stringContaining('mail.google.com'))
+    expect(screen.getByRole('button', { name: /Unsubscribe in one click/ })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Add to cleanup list/ }))
     await userEvent.click(screen.getByRole('button', { name: /All senders/ }))
     await userEvent.click(screen.getByRole('tab', { name: /Cleanup list/ }))
@@ -40,5 +44,44 @@ describe('App', () => {
     const table = screen.getByRole('table')
     expect(within(table).queryByText('Yassine B.')).toBeNull()
     expect(within(table).getByText('Souk Deals')).toBeInTheDocument()
+  })
+
+  it('reads a message in a sandboxed frame and marks it read', async () => {
+    await openDemo()
+    await userEvent.click(screen.getAllByRole('button', { name: /Souk Deals/ })[0]!)
+    const section = screen.getByRole('region', { name: /Emails from this sender/ })
+    await waitFor(() => expect(within(section).getAllByRole('listitem').length).toBeGreaterThan(0))
+    await userEvent.click(within(section).getAllByRole('listitem')[0]!.querySelector('button')!)
+    const frame = await screen.findByTitle('Email')
+    expect(frame).toHaveAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox')
+    expect(frame.getAttribute('srcdoc')).toContain("img-src data: cid:")
+    expect(screen.getByText(/tracking pixels never fire/)).toBeInTheDocument()
+  })
+
+  it('archives every email from a sender after a confirmation and pops the bubble', async () => {
+    await openDemo()
+    await userEvent.click(screen.getAllByRole('button', { name: /Souk Deals/ })[0]!)
+    const section = screen.getByRole('region', { name: /Emails from this sender/ })
+    await waitFor(() => expect(within(section).getAllByRole('listitem').length).toBeGreaterThan(0))
+    await userEvent.click(within(section).getByRole('button', { name: 'Archive all' }))
+    const dialog = await screen.findByRole('dialog', { name: /Archive these emails/ })
+    await waitFor(() => expect(dialog).toHaveTextContent(/emails from Souk Deals will leave your inbox/))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Archive all' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/emails archived/), { timeout: 4000 })
+    await waitFor(() => expect(screen.getByRole('img', { name: /Bubble map of 28 senders/ })).toBeInTheDocument(), { timeout: 4000 })
+  })
+
+  it('switches to Arabic (right to left) and French', async () => {
+    render(<App />)
+    await userEvent.click(screen.getByRole('radio', { name: 'العربية' }))
+    expect(document.documentElement.dir).toBe('rtl')
+    expect(document.documentElement.lang).toBe('ar')
+    expect(screen.getByRole('heading', { name: /اكتشف من يملأ صندوق بريدك/ })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('radio', { name: 'Français' }))
+    expect(document.documentElement.dir).toBe('ltr')
+    expect(screen.getByRole('heading', { name: /Voyez qui remplit votre boîte/ })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Explorer une boîte de démonstration/ }))
+    expect(screen.getByRole('img', { name: /Carte de 29 expéditeurs/ })).toBeInTheDocument()
+    expect(localStorage.getItem('ibm:lang')).toBe('fr')
   })
 })

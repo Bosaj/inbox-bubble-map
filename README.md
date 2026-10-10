@@ -4,9 +4,9 @@
 
 [![CI](https://github.com/Bosaj/inbox-bubble-map/actions/workflows/ci.yml/badge.svg)](https://github.com/Bosaj/inbox-bubble-map/actions/workflows/ci.yml)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
-![Privacy](https://img.shields.io/badge/reads-headers%20only-4a3aa7)
+![Privacy](https://img.shields.io/badge/privacy-no%20storage%2C%20no%20tracking-4a3aa7)
 
-**Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.6 — premium design with company logos, colour classes and filters, pin bubbles anywhere, select and move groups.
+**Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.7 — read and clean your mail from the map (archive, trash, spam, mark read, one-click unsubscribe), in Arabic, French or English.
 **Author:** Oussama EL HADJI. Part of the Bosaj ideas portfolio (sibling repo: `dual_portfolio_hub`).
 
 <p align="center"><img src="docs/map-logos-dark.webp" alt="Premium dark theme: glossy bubbles with company logos (GitHub, LinkedIn, Medium, Booking.com…) and inbox insights" width="820" /></p>
@@ -36,10 +36,10 @@ Only three colours are used on purpose. In an all-pairs chart like this, three h
 
 | Provider | How | What is read |
 |---|---|---|
-| **Gmail** | Google sign-in (`gmail.metadata`) or an app password | headers + labels |
-| **Outlook / Hotmail / Microsoft 365** | Microsoft sign-in (`Mail.ReadBasic`) | headers, read state, Focused/Other |
-| **Yahoo, iCloud, AOL, GMX, Zoho, Fastmail, any IMAP** | app password through the relay | headers + read flag |
-| **Any export** | drop a `.mbox` (Google Takeout, Thunderbird, Apple Mail) or `.eml` | headers |
+| **Gmail** | Google sign-in (`gmail.modify`) or an app password | map, read, archive, trash, spam, mark read, unsubscribe by email |
+| **Outlook / Hotmail / Microsoft 365** | Microsoft sign-in (`Mail.ReadWrite`) | map, read, archive, trash, junk, mark read |
+| **Yahoo, iCloud, AOL, GMX, Zoho, Fastmail, any IMAP** | app password through the relay | map, read, archive, trash, spam, mark read |
+| **Any export** | drop a `.mbox` (Google Takeout, Thunderbird, Apple Mail) or `.eml` | map only (read-only) |
 | **Demo** | fictional inbox | — |
 
 Outlook.com switched off IMAP app passwords in September 2024, which is why Outlook uses Microsoft sign-in.
@@ -56,16 +56,21 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 - **Time range.** 30 days, 90 days, 1 year or everything, measured from your newest message.
 - **Insights.** Share of mail from lists, list emails per week, senders you never open, top-5 concentration, and how many emails a year your cleanup list will save you.
 - **Sender detail.** Messages, unread %, last/first seen, a 12-month activity chart, recent subjects and addresses.
-- **Clean up.** *Unsubscribe* opens the `List-Unsubscribe` page or a pre-filled email. *Find in Gmail* searches `from:` for bulk archive. *Top cleanup picks* ranks by volume × unread × unsubscribable.
+- **Read mail from the map.** The sender panel lists that sender's newest messages. Open one in a reader that blocks remote images and fonts (no tracking pixel ever fires), runs no scripts and opens links in a new tab.
+- **Act on it.** Per message: mark read/unread, archive, trash, spam. Per sender or per selection: *Mark all read*, *Archive all*, *Move all to trash*, *Report spam*, with a confirmation that shows the count. Trash stays recoverable; nothing is ever permanently deleted. Emptied senders pop off the map.
+- **Unsubscribe properly.** One-click RFC 8058 unsubscribe through `/api/unsubscribe` when the sender supports it; otherwise Gmail sends the `mailto:` unsubscribe email for you, or the sender's page opens. *Top cleanup picks* ranks by volume × unread × unsubscribable.
+- **Arabic, French, English.** A language switcher on every screen, right-to-left layout and an Arabic typeface for Arabic, and local number and date formats.
 - **Exports.** CSV, **Gmail filters** (`.xml`: skip inbox and mark read), **Sieve** rules (Fastmail, Proton, Posteo, cPanel…), and the **map as a PNG**.
 - Search, grouping by company or address, zoom/pan, light/dark/system theme, responsive layout, strict CSP.
 
 ## Privacy
 
-- Only headers are read: From, Date, Subject, List-Unsubscribe(-Post), List-Id, Precedence and read state. Never bodies or attachments.
-- Files, Google sign-in and Microsoft sign-in run **entirely in your browser**. Tokens stay in the tab.
-- Browsers can't open IMAP connections, so app-password providers go through `/api/imap`, a Vercel Function. Per request it connects over TLS, reads the newest N header blocks, returns them and disconnects. It **never stores or logs** credentials or mail.
-- **Relay hardening.** Port 993/TLS only; public hostnames only (DNS checked, private ranges refused, connection pinned to the checked address); same-origin requests only; 4 KB body limit; per-IP rate limit and a lockout after failed logins; `Cache-Control: no-store`.
+- The map is built from headers only: From, Date, Subject, List-Unsubscribe(-Post), List-Id, Precedence and read state. A message body is fetched only when you open that message, and your mailbox changes only after you confirm an action.
+- Files, Google sign-in and Microsoft sign-in run **entirely in your browser**. Tokens stay in the tab's memory.
+- Browsers can't open IMAP connections, so app-password providers go through `/api/imap`, a Vercel Function. Per request it connects over TLS, does one thing (read headers, list a sender, open one message, or apply one confirmed action), returns and disconnects. Your password stays in the tab and is sent with each request; the relay **never stores or logs** credentials or mail.
+- **Relay hardening.** Port 993/TLS only; public hostnames only (DNS checked, private ranges refused, connection pinned to the checked address); same-origin requests only; 64 KB body limit; strict validation of sender lists and message ids; separate rate limits for full reads and for actions, plus a lockout after failed logins; `Cache-Control: no-store`. Trash and archive use the account's special-use folders (RFC 6154); nothing is expunged.
+- **One-click unsubscribe relay** (`/api/unsubscribe`): POSTs only the standard `List-Unsubscribe=One-Click` body to an https URL from your own headers, on port 443, to a public address it checked and pinned. No cookies, no referrer, no redirects followed, 8-second timeout, rate-limited, nothing logged.
+- **Reading mail.** HTML is shown in a sandboxed iframe (no scripts, no same-origin) with its own CSP (`default-src 'none'; img-src data: cid:`), so remote images, fonts and forms are blocked.
 - No analytics, no cookies. Nothing is saved when you close the tab (only the theme choice).
 - Unsubscribe links come from the emails and open only when you click them. Only `https:` and `mailto:` links are accepted.
 - **Company logos** are requested from this site (`/api/logo?d=domain`), which fetches them from fixed icon services and caches them. Your browser never contacts an icon service, and the proxy never connects to the sender's own server, so it can't be used for SSRF. People and personal addresses never get logo requests.
@@ -73,22 +78,25 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 ## Architecture
 
 ```
-api/imap.ts             IMAP header relay (Vercel Function): validation, SSRF guard, rate limit, imapflow
+api/imap.ts             IMAP relay (Vercel Function): headers / list / ids / body (postal-mime) / act; SSRF guard, rate limits, imapflow
+api/unsubscribe.ts      RFC 8058 one-click unsubscribe relay (https only, pinned address, no redirects)
 api/logo.ts             company icon proxy (fixed sources, type/size checks, 30-day CDN cache)
 api/_lib/net.ts         shared hostname / private-address guards (not a route)
 src/lib/display.ts      colour modes, filters, selection presets, logo domains, initials
 src/lib/headers.ts      RFC 2047 decoding, From / List-Unsubscribe / Date parsing
 src/lib/mbox.ts         streaming mbox reader (header blocks only, folding, CRLF)
 src/lib/parse.worker.ts Web Worker: File.stream() → parser, progress events
-src/lib/gmail.ts        Gmail API client (GIS token, paging, retry, concurrency)
-src/lib/outlook.ts      Microsoft Graph client (MSAL v5 popup, paging, header fallback)
-src/lib/providers.ts    provider presets + relay client
+src/lib/mailbox.ts      Mailbox interface, reader document (sandbox + CSP), demo mailbox, map updates after actions
+src/lib/gmail.ts        Gmail API client (GIS token, paging, retry), read bodies, batchModify / trash / send
+src/lib/outlook.ts      Microsoft Graph client (MSAL v5, silent refresh), read bodies, JSON $batch moves
+src/lib/providers.ts    provider presets + IMAP relay client and mailbox
+src/i18n.tsx            English, French and Arabic strings, plural rules, locale formats
 src/lib/aggregate.ts    grouping, categories, months, insights, CSV / Gmail filters / Sieve
 src/lib/layout.ts       scales + shared d3-force setup (static layout for tests and first frame)
-src/components/         BubbleMap (physics, pins, lasso, group drag), MapControls (display / filters / select / legend / group bar), ConnectDialog, Insights…
+src/components/         BubbleMap (physics, pins, lasso, group drag), MapControls, MailUI (messages, reader, bulk actions, unsubscribe), LangSwitch, ConnectDialog, Insights…
 ```
 
-43 Vitest tests cover colour modes, filters, selection presets, the logo proxy, header decoding, chunk-independent mbox parsing, aggregation and insights, exports (Gmail XML parses, Sieve escaping), the layout, the Gmail and Graph clients (paging, retries, header fallback), and the relay (validation, SSRF, rate limit, origin check, no credential echo). The relay's imapflow path was also run end-to-end against a GreenMail IMAP server.
+63 Vitest tests cover colour modes, filters, selection presets, the logo proxy, header decoding, chunk-independent mbox parsing, aggregation and insights, exports, the layout, the Gmail and Graph clients (paging, retries, body decoding, batchModify / trash / $batch moves, expired tokens), the IMAP relay (validation, SSRF, rate limits, origin check, special-use folders), the unsubscribe relay (URL checks, pinning, private targets, origin, rate limit), the reader CSP, the demo mailbox, translations (every key in all three languages) and the app flows (read a message, archive a sender, switch to Arabic). `GREENMAIL=1 npm test` also runs the relay's real imapflow code (list, open, mark read, move to Trash/Archive) against a local GreenMail IMAP server.
 
 ## Getting started
 
@@ -108,14 +116,16 @@ Optional sign-ins: copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID`
 - [x] v0.3 — unsubscribe links, Gmail search for bulk archive, cleanup list + CSV — [#3](https://github.com/Bosaj/inbox-bubble-map/issues/3)
 - [x] v0.4 — live physics, any provider (IMAP relay + Outlook), insights, filter exports — [#4](https://github.com/Bosaj/inbox-bubble-map/issues/4), [#7](https://github.com/Bosaj/inbox-bubble-map/issues/7)–[#10](https://github.com/Bosaj/inbox-bubble-map/issues/10)
 - [x] v0.6 — premium design with company logos, colour classes and filters, free placement and group selection — [#12](https://github.com/Bosaj/inbox-bubble-map/issues/12)–[#14](https://github.com/Bosaj/inbox-bubble-map/issues/14)
-- [ ] Next — one-click RFC 8058 unsubscribe relay and optional in-app bulk archive — [#5](https://github.com/Bosaj/inbox-bubble-map/issues/5)
+- [x] v0.7 — read and act on mail (archive, trash, spam, mark read, bulk clean), one-click unsubscribe, Arabic and French, Google sign-in on — [#5](https://github.com/Bosaj/inbox-bubble-map/issues/5), [#17](https://github.com/Bosaj/inbox-bubble-map/issues/17)–[#20](https://github.com/Bosaj/inbox-bubble-map/issues/20)
+- [ ] Next — Microsoft sign-in client ID; Google verification for public (non-test) Gmail users
 
 ---
 
 ## For LLM agents & contributors continuing this project
 
-- Keep the client-side paths client-side. The relay must stay stateless: no storage, no logs of credentials or mail, headers only.
-- Request the narrowest scopes (`gmail.metadata`, `Mail.ReadBasic`). Never fetch or store bodies.
+- Keep the client-side paths client-side. The relays must stay stateless: no storage, no logs of credentials, URLs or mail.
+- Scopes are `gmail.modify` and `Mail.ReadWrite` because the app archives, trashes and marks mail. Fetch a body only when the user opens that message, change mail only after a confirmation, and never delete permanently.
+- Every user-facing string lives in `src/i18n.tsx` in all three languages; the translation test fails if a key is missing.
 - Don't add categorical colours to the map: three categories are the validated maximum for this chart form. Sequential modes use a single hue, light to dark.
 - Parser or relay changes need tests (`src/lib/lib.test.ts`, `src/lib/v04.test.ts`).
 

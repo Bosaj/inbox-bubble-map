@@ -4,6 +4,18 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-11
+### Added
+- Read mail inside the app: the sender panel lists that sender's newest messages, and a reader shows them in a sandboxed iframe with its own CSP, so remote images, fonts, forms and scripts are blocked. Works for Gmail, Outlook, IMAP and the demo inbox. (#17)
+- Act on mail: mark read/unread, archive, trash and report spam per message, per sender or for a whole selection, with confirmations and progress. Emptied senders pop off the map. Gmail uses `batchModify` and `messages.trash`, Outlook uses JSON `$batch` moves, IMAP uses flags and `MOVE` to the special-use Archive / Trash / Junk folders. (#18)
+- `POST /api/unsubscribe`: RFC 8058 one-click unsubscribe relay (https on 443 only, DNS-checked and pinned public address, no redirects, rate-limited). Gmail can send the `mailto:` unsubscribe email itself. (#5)
+- IMAP relay actions `list`, `ids`, `body` (parsed with postal-mime) and `act`, with separate rate limits for reads and actions. (#18)
+- Arabic (right to left, IBM Plex Sans Arabic) and French interface with a language switcher, local number/date formats and error messages mapped from relay codes. (#19)
+- Google sign-in switched on: `VITE_GOOGLE_CLIENT_ID` set in Vercel for a Testing-mode Google Auth Platform app. (#20)
+
+### Changed
+- Scopes are now `gmail.modify` and `Mail.ReadWrite` (needed for the actions above). Bodies are fetched only when a message is opened.
+
 ## [0.6.0] - 2026-10-10
 ### Added
 - Premium redesign: Geist and Instrument Serif type, aurora background, glass panels, glossy 3D bubbles with depth, and company logos on white plates with a monogram fallback. (#12)
