@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Inbox Bubble Map</title>
+    <meta name="description" content="See your inbox as a bubble map of senders — newsletters, notifications, people — and unsubscribe in a click. Runs entirely in your browser." />
+    <meta name="theme-color" content="#f3f3f1" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111110" media="(prefers-color-scheme: dark)" />
+    <meta property="og:title" content="Inbox Bubble Map" />
+    <meta property="og:description" content="Every sender becomes a bubble. Spot the newsletters you never open and clean up — privately, in your browser." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script>
+      try {
+        var t = localStorage.getItem('ibm:theme')
+        if (t && t !== 'system') document.documentElement.dataset.theme = t
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
