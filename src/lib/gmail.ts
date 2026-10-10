@@ -90,16 +90,85 @@ export function metaFromGmail(msg: GmailMessage): MessageMeta {
 
 type Fetch = typeof fetch
 
-async function call<T>(url: string, token: string, f: Fetch, init: RequestInit = {}, attempt = 0): Promise<T> {
-  const res = await f(url, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'content-type': 'application/json' } : {}), ...init.headers } })
-  if ((res.status === 429 || res.status >= 500) && attempt < 4) {
-    await new Promise((r) => setTimeout(r, 400 * 2 ** attempt))
-    return call(url, token, f, init, attempt + 1)
+/** A Gmail API error with the HTTP status and Google's reason (e.g. "rateLimitExceeded"). */
+export class GmailError extends Error {
+  code: string
+  constructor(
+    public status: number,
+    public reason: string,
+  ) {
+    super(`Gmail API ${status}${reason ? ` (${reason})` : ''}`)
+    this.code = isRateLimit(status, reason) ? 'gmailRate' : 'generic'
   }
+}
+
+const RATE_REASONS = /rateLimitExceeded|userRateLimitExceeded|quotaExceeded|RESOURCE_EXHAUSTED|concurrentLimitExceeded|backendError/i
+
+/** Gmail signals throttling with 429, and also with 403 + a rate-limit reason. */
+export function isRateLimit(status: number, reason = ''): boolean {
+  return status === 429 || (status === 403 && RATE_REASONS.test(reason))
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** Shared throttle state: every request waits for a token; a rate-limit answer pauses everyone. */
+export class Throttle {
+  private tokens: number
+  private last = Date.now()
+  private pausedUntil = 0
+  constructor(
+    public perSecond: number,
+    private burst = perSecond,
+  ) {
+    this.tokens = burst
+  }
+  async take(): Promise<void> {
+    for (;;) {
+      const now = Date.now()
+      if (now < this.pausedUntil) {
+        await sleep(this.pausedUntil - now)
+        continue
+      }
+      this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) / 1000) * this.perSecond)
+      this.last = now
+      if (this.tokens >= 1) {
+        this.tokens -= 1
+        return
+      }
+      await sleep(Math.ceil(((1 - this.tokens) / this.perSecond) * 1000))
+    }
+  }
+  /** Back off after a rate-limit answer and slow down for the rest of the run. */
+  penalize(ms: number) {
+    this.pausedUntil = Math.max(this.pausedUntil, Date.now() + ms)
+    this.perSecond = Math.max(5, this.perSecond * 0.75)
+    this.tokens = 0
+  }
+}
+
+async function call<T>(url: string, token: string, f: Fetch, init: RequestInit = {}, throttle?: Throttle, attempt = 0): Promise<T> {
+  await throttle?.take()
+  const res = await f(url, { ...init, headers: { Authorization: `Bearer ${token}`, ...(init.body ? { 'content-type': 'application/json' } : {}), ...init.headers } })
   if (res.status === 401) throw new AuthExpired()
-  if (!res.ok) throw new Error(`Gmail API ${res.status}`)
-  const text = await res.text()
-  return (text ? JSON.parse(text) : {}) as T
+  if (res.ok) {
+    const text = await res.text()
+    return (text ? JSON.parse(text) : {}) as T
+  }
+  let reason = ''
+  try {
+    const body = (await res.json()) as { error?: { status?: string; errors?: { reason?: string }[] } }
+    reason = body.error?.errors?.[0]?.reason ?? body.error?.status ?? ''
+  } catch {
+    /* no JSON body */
+  }
+  const retryable = isRateLimit(res.status, reason) || res.status >= 500
+  if (retryable && attempt < 6) {
+    const wait = (Number(res.headers.get('retry-after')) || 0) * 1000 || Math.min(16_000, 500 * 2 ** attempt) + Math.random() * 400
+    if (throttle) throttle.penalize(wait)
+    else await sleep(wait)
+    return call(url, token, f, init, throttle, attempt + 1)
+  }
+  throw new GmailError(res.status, reason)
 }
 
 export interface FetchProgress {
@@ -107,33 +176,87 @@ export interface FetchProgress {
   total: number
 }
 
-/** Fetch metadata for the newest `limit` messages, `concurrency` requests at a time. */
+/**
+ * Fetch metadata for the newest `limit` messages.
+ * Gmail allows about 50 message reads per second per user, so requests are
+ * paced (default 40/s), and a rate-limit answer pauses and slows every worker.
+ * `onChunk` streams results so the map can appear before everything arrived.
+ * A message that keeps failing is skipped instead of failing the whole import.
+ */
 export async function fetchGmailMetadata(
   token: string,
-  { limit = 2000, concurrency = 8, onProgress, signal, fetchImpl = fetch }: { limit?: number; concurrency?: number; onProgress?: (p: FetchProgress) => void; signal?: AbortSignal; fetchImpl?: Fetch } = {},
+  {
+    limit = 2000,
+    concurrency = 12,
+    perSecond = 40,
+    onProgress,
+    onChunk,
+    chunkEvery = 1500,
+    signal,
+    fetchImpl = fetch,
+  }: {
+    limit?: number
+    concurrency?: number
+    perSecond?: number
+    onProgress?: (p: FetchProgress) => void
+    onChunk?: (msgs: MessageMeta[], p: FetchProgress) => void
+    chunkEvery?: number
+    signal?: AbortSignal
+    fetchImpl?: Fetch
+  } = {},
 ): Promise<MessageMeta[]> {
+  const throttle = new Throttle(perSecond)
   const ids: string[] = []
   let pageToken: string | undefined
   do {
     const url = new URL(`${API}/messages`)
     url.searchParams.set('maxResults', String(Math.min(500, limit - ids.length)))
     if (pageToken) url.searchParams.set('pageToken', pageToken)
-    const page = await call<{ messages?: { id: string }[]; nextPageToken?: string }>(url.toString(), token, fetchImpl)
+    const page = await call<{ messages?: { id: string }[]; nextPageToken?: string }>(url.toString(), token, fetchImpl, {}, throttle)
     for (const m of page.messages ?? []) ids.push(m.id)
     pageToken = page.nextPageToken
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   } while (pageToken && ids.length < limit)
 
   const out: MessageMeta[] = []
+  let pending: MessageMeta[] = []
+  let lastChunk = Date.now()
   let done = 0
+  let failed = 0
+  let lastError: unknown = null
   const qs = HEADERS.map((h) => `metadataHeaders=${encodeURIComponent(h)}`).join('&')
+  let flushed = false
+  /** First chunk after 200 messages (the map appears), then at most every `chunkEvery` ms. */
+  const flush = (final = false) => {
+    if (!onChunk || !pending.length) return
+    if (!final && (flushed ? Date.now() - lastChunk < chunkEvery : pending.length < 200)) return
+    flushed = true
+    onChunk(pending, { done, total: ids.length })
+    pending = []
+    lastChunk = Date.now()
+  }
   await pool(ids, concurrency, async (id) => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-    const msg = await call<GmailMessage>(`${API}/messages/${id}?format=metadata&${qs}`, token, fetchImpl)
-    const meta = metaFromGmail(msg)
-    if (meta.fromEmail.includes('@')) out.push(meta)
-    onProgress?.({ done: ++done, total: ids.length })
+    try {
+      const msg = await call<GmailMessage>(`${API}/messages/${id}?format=metadata&${qs}`, token, fetchImpl, {}, throttle)
+      const meta = metaFromGmail(msg)
+      if (meta.fromEmail.includes('@')) {
+        out.push(meta)
+        pending.push(meta)
+      }
+    } catch (err) {
+      if (err instanceof AuthExpired) throw err
+      failed++
+      lastError = err
+      // nothing works at all (wrong scope, API off): stop instead of skipping everything
+      if (failed >= 20 && failed > done / 2) throw err
+    }
+    done++
+    onProgress?.({ done, total: ids.length })
+    flush()
   })
+  flush(true)
+  if (!out.length && lastError) throw lastError
   return out
 }
 
@@ -178,7 +301,8 @@ function base64UrlUtf8(s: string): string {
 
 export function gmailMailbox(initialToken: string, clientId: string, fetchImpl: Fetch = fetch): Mailbox {
   let token = initialToken
-  const api = <T,>(path: string, init?: RequestInit) => call<T>(`${API}${path}`, token, fetchImpl, init)
+  const throttle = new Throttle(40)
+  const api = <T,>(path: string, init?: RequestInit) => call<T>(`${API}${path}`, token, fetchImpl, init, throttle)
 
   const partText = async (id: string, part: GmailPart): Promise<string> => {
     let data = part.body?.data

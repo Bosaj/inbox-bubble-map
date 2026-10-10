@@ -84,6 +84,8 @@ const en = {
   readingHost: (host: string) => `Reading headers from ${host}…`,
   soFar: (n: string) => `${n} so far`,
   messagesRead: (n: string) => `${n} messages read`,
+  loadingMore: (done: string, total: string) => `Loading more mail… ${done} / ${total}`,
+  stoppedAt: (n: string, reason: string) => `Stopped after ${n} messages: ${reason}`,
 
   cat: {
     bulk: { label: 'Newsletters & promos', hint: 'Mailing lists you can usually unsubscribe from' },
@@ -172,6 +174,7 @@ const en = {
     refused: 'The sender’s server refused the request.',
     unreachable: 'The sender’s server didn’t answer.',
     generic: 'Something went wrong. Try again.',
+    gmailRate: 'Gmail is limiting how fast the app can read. Wait a minute and try again, or choose fewer messages.',
   } as Record<string, string>,
 
   /* map controls */
@@ -429,6 +432,8 @@ const fr: Strings = {
   readingHost: (host) => `Lecture des en-têtes depuis ${host}…`,
   soFar: (n) => `${n} pour l’instant`,
   messagesRead: (n) => `${n} messages lus`,
+  loadingMore: (done, total) => `Chargement du courrier… ${done} / ${total}`,
+  stoppedAt: (n, reason) => `Arrêté après ${n} messages : ${reason}`,
 
   cat: {
     bulk: { label: 'Newsletters & promos', hint: 'Listes dont on peut en général se désabonner' },
@@ -514,6 +519,7 @@ const fr: Strings = {
     refused: 'Le serveur de l’expéditeur a refusé la demande.',
     unreachable: 'Le serveur de l’expéditeur n’a pas répondu.',
     generic: 'Un problème est survenu. Réessayez.',
+    gmailRate: 'Gmail limite la vitesse de lecture. Patientez une minute et réessayez, ou choisissez moins de messages.',
   },
 
   colorBy: 'Couleur selon',
@@ -751,6 +757,8 @@ const arS: Strings = {
   readingHost: (host) => `جارٍ قراءة الترويسات من ${host}…`,
   soFar: (n) => `${n} حتى الآن`,
   messagesRead: (n) => `تمت قراءة ${n} رسالة`,
+  loadingMore: (done, total) => `جارٍ تحميل المزيد… ${done} / ${total}`,
+  stoppedAt: (n, reason) => `توقف بعد ${n} رسالة: ${reason}`,
 
   cat: {
     bulk: { label: 'نشرات وعروض', hint: 'قوائم بريدية يمكن عادة إلغاء الاشتراك فيها' },
@@ -836,6 +844,7 @@ const arS: Strings = {
     refused: 'رفض خادم المرسل الطلب.',
     unreachable: 'لم يستجب خادم المرسل.',
     generic: 'حدث خطأ. أعد المحاولة.',
+    gmailRate: 'يحدّ Gmail من سرعة القراءة. انتظر دقيقة ثم أعد المحاولة، أو اختر عددًا أقل من الرسائل.',
   },
 
   colorBy: 'التلوين حسب',
