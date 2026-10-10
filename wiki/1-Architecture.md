@@ -9,6 +9,11 @@ Client-side React + Vite app. The only server code is a stateless IMAP header re
 4. **Layout.** A deterministic d3-force simulation runs synchronously (`layout.ts`). The radial force uses log(days since last message), collision keeps bubbles apart and a weak sector force groups the categories.
 5. **UI.** Live physics map (continuous d3-force + drift, DOM updates per tick, drag & fling, pop animation), side panel with insights and activity chart, sortable table, cleanup list, exports (CSV, Gmail filters, Sieve, PNG).
 
+## Display
+- Colour modes: type (3 validated categorical hues), unread rate and last seen (single-hue sequential ramps), can-unsubscribe (2 classes).
+- Layouts: Orbit (radial recency), Clusters (anchors per type), Free (collide + drift only). Dragged bubbles stay pinned; groups move together.
+- Logos come through `/api/logo`, a same-origin proxy with fixed sources and a 30-day CDN cache.
+
 ## Privacy model
 - Message bodies are skipped during parsing, never stored.
 - The IMAP relay is stateless: port 993/TLS only, SSRF guard with pinned DNS result, same-origin, rate limit, failed-login lockout, never logs credentials or mail.
