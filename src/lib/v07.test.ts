@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applyToMessages, cleanSender, demoMailbox, parseMailto, readerDocument } from './mailbox'
-import { findBodies, fromQuery, gmailMailbox, metaFromGmail } from './gmail'
+import { fetchGmailMetadata, findBodies, fromQuery, gmailMailbox, isRateLimit, metaFromGmail } from './gmail'
 import { fromFilter, outlookMailbox } from './outlook'
 import { imapMailbox } from './providers'
 import { demoMessages } from './demo'
@@ -240,5 +240,37 @@ describe('translations', () => {
     expect(keys(STRINGS.ar).sort()).toEqual(en)
     expect(STRINGS.ar.nMessages(2)).toBe('رسالتان')
     expect(STRINGS.ar.nMessages(5)).toBe('5 رسائل')
+  })
+})
+
+describe('Gmail import under rate limits', () => {
+  const ids = Array.from({ length: 450 }, (_, i) => `m${i}`)
+  const meta = (id: string) => ({ id, internalDate: '1700000000000', labelIds: ['UNREAD'], payload: { headers: [{ name: 'From', value: `S <s${Number(id.slice(1)) % 7}@x.com>` }] } })
+  const limited = () => new Response(JSON.stringify({ error: { errors: [{ reason: 'rateLimitExceeded' }] } }), { status: 403, headers: { 'retry-after': '0.01' } })
+
+  it('backs off on 403 rateLimitExceeded, skips a broken message and streams chunks', async () => {
+    let hits = 0
+    const f = fakeFetch((c) => {
+      if (c.url.includes('/messages?')) return { messages: ids.map((id) => ({ id })) }
+      const id = c.url.split('/messages/')[1]!.split('?')[0]!
+      hits++
+      if (hits % 40 === 0) return limited()
+      if (id === 'm7') return new Response(JSON.stringify({ error: { errors: [{ reason: 'notFound' }] } }), { status: 404 })
+      return meta(id)
+    })
+    const chunks: number[] = []
+    const out = await fetchGmailMetadata('tok', { limit: 450, perSecond: 5000, fetchImpl: f, onChunk: (m) => chunks.push(m.length), chunkEvery: 0 })
+    expect(out).toHaveLength(449)
+    expect(chunks[0]).toBeGreaterThanOrEqual(200)
+    expect(chunks.reduce((a, b) => a + b, 0)).toBe(449)
+  })
+
+  it('stops with a translated rate-limit error when nothing gets through', async () => {
+    const f = fakeFetch((c) => (c.url.includes('/messages?') ? { messages: ids.slice(0, 30).map((id) => ({ id })) } : new Response(JSON.stringify({ error: { errors: [{ reason: 'insufficientPermissions' }] } }), { status: 403 })))
+    await expect(fetchGmailMetadata('tok', { limit: 30, perSecond: 5000, fetchImpl: f })).rejects.toMatchObject({ status: 403, reason: 'insufficientPermissions' })
+    expect(isRateLimit(403, 'userRateLimitExceeded')).toBe(true)
+    expect(isRateLimit(403, 'insufficientPermissions')).toBe(false)
+    expect(isRateLimit(429)).toBe(true)
+    expect(STRINGS.fr.errors.gmailRate).toBeTruthy()
   })
 })
