@@ -138,19 +138,19 @@ function Reader({ mailbox, item, onClose, onApplied, emails }: { mailbox: Mailbo
     <div className="flex max-h-[92dvh] flex-col">
       <header className="flex items-start gap-3 border-b border-line p-5">
         <div className="min-w-0 flex-1">
-          <h2 className="text-[17px] font-semibold leading-snug" dir="auto">
-            {body?.subject ?? item.subject ?? t.noSubject}
+          <h2 className="text-[17px] font-semibold leading-snug">
+            <bdi>{body?.subject || item.subject || t.noSubject}</bdi>
           </h2>
           <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[12.5px]">
             <dt className="text-ink-3">{t.from}</dt>
-            <dd className="truncate" dir="auto">
-              {body?.from ?? item.from}
+            <dd className="truncate">
+              <bdi>{body?.from ?? item.from}</bdi>
             </dd>
             {body?.to && (
               <>
                 <dt className="text-ink-3">{t.to}</dt>
-                <dd className="truncate" dir="auto">
-                  {body.to}
+                <dd className="truncate">
+                  <bdi>{body.to}</bdi>
                 </dd>
               </>
             )}
@@ -297,11 +297,11 @@ export function MailSection({ sender, mailbox, onApplied }: { sender: Sender; ma
       </div>
       {mailbox.kind === 'demo' && <p className="mb-2 text-[12px] text-ink-3">{t.mailDemoNote}</p>}
 
-      <div className="mb-3 grid grid-cols-2 gap-1.5">
+      <div className="mb-3 flex flex-wrap gap-1.5">
         {BULK_ACTIONS.map((a) => {
           const Icon = ICON[a]
           return (
-            <Button key={a} size="sm" variant="secondary" disabled={!items?.length || busy || (a === 'read' && !unread && total <= (items?.length ?? 0))} onClick={() => ask(a)} className="justify-start">
+            <Button key={a} size="sm" variant="secondary" disabled={!items?.length || busy || (a === 'read' && !unread && total <= (items?.length ?? 0))} onClick={() => ask(a)} className="whitespace-nowrap">
               <Icon size={14} className={a === 'trash' || a === 'spam' ? 'text-[var(--danger)]' : 'text-accent'} /> {t.bulk[a]}
             </Button>
           )

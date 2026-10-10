@@ -7,6 +7,7 @@ import { demoMessages } from './demo'
 import { pickFolder, validate } from '../../api/imap'
 import { allowUnsub, checkUrl, handleUnsub } from '../../api/unsubscribe'
 import { STRINGS } from '../i18n'
+import type { MessageMeta } from './headers'
 
 type Call = { url: string; method: string; body?: string }
 function fakeFetch(handler: (c: Call) => unknown, calls: Call[] = []) {
@@ -52,7 +53,7 @@ describe('mailbox helpers', () => {
   })
 
   it('runs the demo mailbox end to end', async () => {
-    let current = msgs
+    let current: MessageMeta[] = msgs
     const box = demoMailbox(() => current)
     const page = await box.list([souk], 5)
     expect(page.items).toHaveLength(5)

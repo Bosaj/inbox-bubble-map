@@ -174,6 +174,11 @@ export const imapFetch: Fetcher = async (req, address) => {
     socketTimeout: 40_000,
     clientInfo: { name: 'Inbox Bubble Map' },
   })
+  return runImap(client, req)
+}
+
+/** Connect, run one relay action, always log out. Exported so tests can point it at a local server. */
+export async function runImap(client: ImapFlow, req: RelayRequest): Promise<Record<string, unknown>> {
   await client.connect()
   try {
     const action = req.action ?? 'headers'
