@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { ChevronDown, FileUp, Lock, Sparkles } from 'lucide-react'
 import { PROVIDERS, type Provider } from '../lib/providers'
 import { Button, num } from './ui'
+import { LangSwitch } from './LangSwitch'
+import { useI18n } from '../i18n'
 
 export interface Progress {
   label: string
@@ -33,12 +35,13 @@ function Logo() {
 }
 
 export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: Props) {
+  const { t } = useI18n()
   const input = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
 
   return (
     <div
-      className={`aurora min-h-dvh ${drag ? 'drop-active' : ''}`}
+      className={`aurora relative min-h-dvh ${drag ? 'drop-active' : ''}`}
       onDragOver={(e) => {
         e.preventDefault()
         setDrag(true)
@@ -51,6 +54,9 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
         if (files.length) onFiles(files)
       }}
     >
+      <div className="absolute end-4 top-4 z-10 sm:end-6 sm:top-5">
+        <LangSwitch />
+      </div>
       <main className="mx-auto flex min-h-dvh max-w-5xl flex-col justify-center gap-10 px-5 py-12 lg:flex-row lg:items-center lg:gap-16">
         <section className="enter flex-1">
           <div className="mb-6 flex items-center gap-3">
@@ -58,30 +64,32 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
               <Logo />
             </span>
             <span className="font-display text-[22px]">
-              Inbox <em className="text-accent">Bubble</em> Map
+              {t.brand.before}
+              <em className="text-accent">{t.brand.em}</em>
+              {t.brand.after}
             </span>
           </div>
-          <h1 className="font-display text-[52px] leading-[0.98] sm:text-[72px]">
-            See who’s <em className="text-accent">filling</em> your inbox.
+          <h1 className="font-display text-[52px] leading-[0.98] rtl:text-[44px] rtl:leading-[1.25] sm:text-[72px] sm:rtl:text-[60px]">
+            {t.hero.before}
+            <em className="text-accent">{t.hero.em}</em>
+            {t.hero.after}
           </h1>
-          <p className="mt-4 max-w-md text-[17px] leading-relaxed text-ink-2">
-            Every sender becomes a bubble: bigger means more mail, closer to you means more recent. Spot the newsletters you never open and unsubscribe in a click.
-          </p>
+          <p className="mt-4 max-w-md text-[17px] leading-relaxed text-ink-2">{t.intro}</p>
           <ul className="mt-6 space-y-2 text-[14px] text-ink-2">
             <li className="flex items-center gap-2.5">
-              <span className="size-2.5 rounded-full bg-bulk" /> Newsletters & promos
+              <span className="size-2.5 rounded-full bg-bulk" /> {t.bullets[0]}
             </li>
             <li className="flex items-center gap-2.5">
-              <span className="size-2.5 rounded-full bg-automated" /> Automated: receipts, alerts
+              <span className="size-2.5 rounded-full bg-automated" /> {t.bullets[1]}
             </li>
             <li className="flex items-center gap-2.5">
-              <span className="size-2.5 rounded-full bg-people" /> People
+              <span className="size-2.5 rounded-full bg-people" /> {t.bullets[2]}
             </li>
           </ul>
           <p className="mt-8 flex max-w-md items-start gap-2.5 rounded-2xl border border-line bg-surface p-3.5 text-[13.5px] text-ink-2 shadow-card">
             <Lock size={16} className="mt-0.5 shrink-0 text-accent" />
             <span>
-              <strong className="font-semibold text-ink">Private by design.</strong> Only headers are read, never message bodies, and nothing is saved when you close the tab. Files, Google and Microsoft sign-ins stay in your browser; app-password connections pass once through a relay that stores nothing.
+              <strong className="font-semibold text-ink">{t.privacyTitle}</strong> {t.privacy}
             </span>
           </p>
         </section>
@@ -94,11 +102,11 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-2">
                   <div className="h-full rounded-full bg-accent transition-[width] duration-200" style={{ width: `${progress.total ? Math.min(100, (progress.done / progress.total) * 100) : 5}%` }} />
                 </div>
-                <p className="tabular mt-3 text-[13px] text-ink-3">{num(progress.messages)} messages read</p>
+                <p className="tabular mt-3 text-[13px] text-ink-3">{t.messagesRead(num(progress.messages))}</p>
               </div>
             ) : (
               <>
-                <p className="mb-3 text-[14px] font-semibold">Connect your inbox</p>
+                <p className="mb-3 text-[14px] font-semibold">{t.connectInbox}</p>
                 <div className="grid grid-cols-2 gap-2">
                   {PROVIDERS.map((p) => (
                     <button
@@ -111,14 +119,14 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
                         {p.name.charAt(0)}
                       </span>
                       <span className="min-w-0">
-                        <span className="block truncate text-[13.5px] font-semibold">{p.name}</span>
+                        <span className="block truncate text-[13.5px] font-semibold">{t.providerName[p.id] ?? p.name}</span>
                       </span>
                     </button>
                   ))}
                 </div>
 
                 <div className="my-4 flex items-center gap-3 text-[12px] text-ink-3">
-                  <span className="h-px flex-1 bg-line" /> or use a file <span className="h-px flex-1 bg-line" />
+                  <span className="h-px flex-1 bg-line" /> {t.orFile} <span className="h-px flex-1 bg-line" />
                 </div>
 
                 <button
@@ -130,8 +138,8 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
                     <FileUp size={20} />
                   </span>
                   <span>
-                    <span className="block text-[14px] font-semibold">Drop an export here</span>
-                    <span className="block text-[12.5px] text-ink-3">.mbox (Google Takeout, Thunderbird, Apple Mail) or .eml</span>
+                    <span className="block text-[14px] font-semibold">{t.dropTitle}</span>
+                    <span className="block text-[12.5px] text-ink-3">{t.dropFormats}</span>
                   </span>
                 </button>
                 <input
@@ -149,24 +157,24 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
 
                 <details className="group mt-3 rounded-xl px-1 text-[13px] text-ink-2">
                   <summary className="flex min-h-9 cursor-pointer list-none items-center gap-1.5 font-medium text-ink-2 hover:text-ink">
-                    <ChevronDown size={15} className="transition-transform group-open:rotate-180" /> How do I get my .mbox?
+                    <ChevronDown size={15} className="transition-transform group-open:rotate-180" /> {t.howMbox}
                   </summary>
                   <ol className="mt-1 list-decimal space-y-1 ps-6 pb-2">
-                    <li>
-                      Open{' '}
-                      <a href="https://takeout.google.com/" target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
-                        Google Takeout
-                      </a>{' '}
-                      and click <em>Deselect all</em>.
-                    </li>
-                    <li>Tick only <em>Mail</em>, then <em>Next step</em> → <em>Create export</em>.</li>
-                    <li>Download the zip, unzip it and drop the <code>.mbox</code> file here.</li>
+                    {t.mboxSteps.map((step, i) => (
+                      <li key={i}>
+                        {step(
+                          <a href="https://takeout.google.com/" target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+                            Google Takeout
+                          </a>,
+                        )}
+                      </li>
+                    ))}
                   </ol>
                 </details>
 
                 <div className="mt-3 grid gap-2">
                   <Button variant="ghost" onClick={onDemo} className="border border-line">
-                    <Sparkles size={16} className="text-accent" /> Explore a demo inbox
+                    <Sparkles size={16} className="text-accent" /> {t.demo}
                   </Button>
                 </div>
               </>
