@@ -14,6 +14,8 @@ export type OnApplied = (action: MailAction, emails: string[], count: number, id
 export function errorText(err: unknown, t: Strings): string {
   if (err instanceof AuthExpired) return t.errors.expired!
   if (err instanceof MailError) return t.errors[err.code] ?? err.message
+  const code = (err as { code?: string })?.code
+  if (code && code !== 'generic' && t.errors[code]) return t.errors[code]!
   const msg = (err as Error)?.message
   return msg && !/^(Gmail API|Microsoft Graph) \d+$/.test(msg) ? msg : t.errors.generic!
 }
