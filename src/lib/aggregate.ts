@@ -21,6 +21,7 @@ export interface Sender {
   oneClick: boolean
   subjects: string[] // up to 3 recent subjects
   gmailCategory?: string // most common Gmail tab, e.g. "promotions"
+  months: Record<string, number> // "2026-10" → messages that month
 }
 
 const AUTOMATED_LOCAL = /^(no-?reply|do-?not-?reply|donotreply|notifications?|notify|alerts?|mailer-daemon|postmaster|bounce|updates?|info|support|service|security|accounts?|billing|receipts?|orders?|team|hello|news|newsletter|marketing|digest)([._+-].*)?$/
@@ -50,6 +51,55 @@ function prettyBrand(domain: string): string {
 
 const RANK: Record<Category, number> = { bulk: 2, automated: 1, people: 0 }
 
+export function monthKey(t: number): string {
+  const d = new Date(t)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+/** Last `n` month keys ending at `ref`, oldest first. */
+export function lastMonths(ref: number, n = 12): string[] {
+  const d = new Date(ref)
+  const out: string[] = []
+  for (let i = n - 1; i >= 0; i--) out.push(monthKey(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1)))
+  return out
+}
+
+/** Average messages per week over the sender's active span (min 4 weeks). */
+export function perWeek(s: Sender): number {
+  if (!s.first || !s.last) return 0
+  const weeks = Math.max(4, (s.last - s.first) / (7 * 86_400_000))
+  return s.count / weeks
+}
+
+export interface Insights {
+  listShare: number
+  neverOpened: Sender[] // ≥ 10 messages, ≥ 90 % unread, not people
+  top5Share: number
+  listPerWeek: number
+  cleanupPerYear: number // messages a year from senders in the cleanup list
+}
+
+export function insights(senders: Sender[], cleanup: Set<string> = new Set()): Insights {
+  const total = senders.reduce((n, s) => n + s.count, 0) || 1
+  const lists = senders.filter((s) => s.category === 'bulk')
+  const sorted = [...senders].sort((a, b) => b.count - a.count)
+  return {
+    listShare: lists.reduce((n, s) => n + s.count, 0) / total,
+    neverOpened: senders.filter((s) => s.category !== 'people' && s.count >= 10 && s.unread / s.count >= 0.9).sort((a, b) => b.count - a.count),
+    top5Share: sorted.slice(0, 5).reduce((n, s) => n + s.count, 0) / total,
+    listPerWeek: lists.reduce((n, s) => n + perWeek(s), 0),
+    cleanupPerYear: Math.round(senders.filter((s) => cleanup.has(s.key)).reduce((n, s) => n + perWeek(s), 0) * 52),
+  }
+}
+
+/** Keep only messages newer than `days` before the newest message (exports can be old). */
+export function inRange<T extends { date: number }>(messages: T[], days: number | null): T[] {
+  if (!days) return messages
+  const newest = messages.reduce((m, x) => Math.max(m, x.date), 0)
+  const from = newest - days * 86_400_000
+  return messages.filter((m) => m.date >= from)
+}
+
 /**
  * Group messages by organisation (root domain) or by exact sender address.
  * Personal freemail addresses (gmail.com …) are always grouped per person.
@@ -75,6 +125,7 @@ export function aggregate(messages: MessageMeta[], groupBy: GroupBy = 'domain'):
         category: 'people',
         oneClick: false,
         subjects: [],
+        months: {},
         tabs: new Map(),
         cats: { bulk: 0, automated: 0, people: 0 },
       }
@@ -83,6 +134,8 @@ export function aggregate(messages: MessageMeta[], groupBy: GroupBy = 'domain'):
     s.count++
     if (m.labels.includes('unread')) s.unread++
     if (m.date) {
+      const mk = monthKey(m.date)
+      s.months[mk] = (s.months[mk] ?? 0) + 1
       s.first = Math.min(s.first, m.date)
       if (m.date >= s.last) {
         s.last = m.date
@@ -169,4 +222,55 @@ export function toCsv(senders: Sender[]): string {
     rows.push([s.label, s.domain, s.category, String(s.count), String(s.unread), s.last ? new Date(s.last).toISOString().slice(0, 10) : '', s.unsubHttp ?? '', s.unsubMailto ?? '', gmailSearchUrl(s)])
   }
   return rows.map((r) => r.map(esc).join(',')).join('\n')
+}
+
+const xmlEsc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+
+/** Gmail filters file (Settings → Filters → Import): skip the inbox and mark read. */
+export function toGmailFilters(senders: Sender[], label = 'Newsletters'): string {
+  const entries = senders
+    .map((s) => {
+      const from = s.key.includes('@') ? s.key : s.domain
+      return `  <entry>
+    <category term='filter'></category>
+    <title>Mail Filter</title>
+    <content></content>
+    <apps:property name='from' value='${xmlEsc(from)}'/>
+    <apps:property name='label' value='${xmlEsc(label)}'/>
+    <apps:property name='shouldArchive' value='true'/>
+    <apps:property name='shouldMarkAsRead' value='true'/>
+    <apps:property name='sizeOperator' value='s_sl'/>
+    <apps:property name='sizeUnit' value='s_smb'/>
+  </entry>`
+    })
+    .join('\n')
+  return `<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns='http://www.w3.org/2005/Atom' xmlns:apps='http://schemas.google.com/apps/2006'>
+  <title>Mail Filters</title>
+${entries}
+</feed>
+`
+}
+
+const sieveEsc = (v: string) => v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+
+/** Sieve script (Fastmail, Proton, Posteo, Dovecot/cPanel…): file into a folder and mark read. */
+export function toSieve(senders: Sender[], folder = 'Newsletters'): string {
+  const domains = senders.filter((s) => !s.key.includes('@')).map((s) => `"${sieveEsc(s.domain)}"`)
+  const addresses = senders.filter((s) => s.key.includes('@')).map((s) => `"${sieveEsc(s.key)}"`)
+  const tests: string[] = []
+  if (domains.length) tests.push(`address :domain :is "from" [${domains.join(', ')}]`)
+  if (addresses.length) tests.push(`address :is "from" [${addresses.join(', ')}]`)
+  if (!tests.length) return '# No senders selected\n'
+  return `require ["fileinto", "imap4flags"];
+
+# Generated by Inbox Bubble Map: ${senders.length} sender(s)
+if anyof (
+  ${tests.join(',\n  ')}
+) {
+  addflag "\\\\Seen";
+  fileinto "${sieveEsc(folder)}";
+  stop;
+}
+`
 }

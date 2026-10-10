@@ -1,15 +1,58 @@
-import { ArrowLeft, Check, ExternalLink, ListChecks, Mail, Plus, Search, Sparkles } from 'lucide-react'
-import { gmailSearchUrl, type Sender } from '../lib/aggregate'
+import { ArrowLeft, Check, CircleCheckBig, ExternalLink, ListChecks, Mail, Plus, Search, Sparkles } from 'lucide-react'
+import { gmailSearchUrl, lastMonths, perWeek, type Sender } from '../lib/aggregate'
 import { ago, Button, CATEGORY_META, dateFmt, Dot, LinkButton, num, pct, Stat } from './ui'
 
 interface DetailProps {
   sender: Sender
   inCleanup: boolean
   onToggleCleanup: () => void
+  onCleaned: () => void
   onBack: () => void
+  refTime: number
 }
 
-export function SenderDetail({ sender: s, inCleanup, onToggleCleanup, onBack }: DetailProps) {
+const MONTH = new Intl.DateTimeFormat('en-GB', { month: 'short', timeZone: 'UTC' })
+
+/** 12-month activity bars: single series, baseline-anchored, hover for exact counts. */
+function Activity({ s, refTime }: { s: Sender; refTime: number }) {
+  const months = lastMonths(refTime, 12)
+  const values = months.map((m) => s.months[m] ?? 0)
+  const max = Math.max(1, ...values)
+  const W = 300
+  const H = 72
+  const gap = 2
+  const bw = (W - gap * 11) / 12
+  return (
+    <figure className="mt-5">
+      <figcaption className="mb-2 flex items-baseline justify-between text-[12px] text-ink-3">
+        <span className="font-semibold uppercase tracking-wide">Last 12 months</span>
+        <span className="tabular">≈ {perWeek(s) >= 1 ? `${perWeek(s).toFixed(1)} / week` : `${(perWeek(s) * 4.33).toFixed(1)} / month`}</span>
+      </figcaption>
+      <svg viewBox={`0 0 ${W} ${H + 16}`} className="w-full" role="img" aria-label={`Messages per month: ${months.map((m, i) => `${m} ${values[i]}`).join(', ')}`}>
+        <line x1={0} x2={W} y1={H} y2={H} stroke="var(--grid)" />
+        {values.map((v, i) => {
+          const h = v ? Math.max(6, (v / max) * (H - 4)) : 0
+          const x = i * (bw + gap)
+          const label = MONTH.format(new Date(`${months[i]}-01T00:00:00Z`))
+          return (
+            <g key={months[i]}>
+              <title>{`${label}: ${v} message${v === 1 ? '' : 's'}`}</title>
+              <rect x={x} y={0} width={bw} height={H} fill="transparent" />
+              {h > 0 && <path d={`M${x},${H} v${-(h - 4)} q0,-4 4,-4 h${bw - 8} q4,0 4,4 v${h - 4} z`} fill="var(--accent)" opacity={0.85} />}
+              {(i === 0 || i === 11 || i === 6) && (
+                <text x={x + bw / 2} y={H + 13} textAnchor="middle" fontSize={10} fill="var(--ink-3)">
+                  {label}
+                </text>
+              )}
+            </g>
+          )
+        })}
+      </svg>
+    </figure>
+  )
+}
+
+export function SenderDetail({ sender: s, inCleanup, onToggleCleanup, onCleaned, onBack, refTime }: DetailProps) {
   const unreadRatio = s.count ? s.unread / s.count : 0
   return (
     <div className="enter">
@@ -59,11 +102,16 @@ export function SenderDetail({ sender: s, inCleanup, onToggleCleanup, onBack }: 
           {inCleanup ? <Check size={14} /> : <Plus size={14} />} {inCleanup ? 'In cleanup list' : 'Add to cleanup list'}
         </Button>
       </div>
+      <Button size="sm" variant="ghost" onClick={onCleaned} className="mt-2 min-h-10 w-full rounded-xl border border-dashed border-line-strong">
+        <CircleCheckBig size={15} className="text-people" /> Done, I unsubscribed: pop it off the map
+      </Button>
       <p className="mt-2 text-[12px] text-ink-3">
         {s.unsubHttp || s.unsubMailto
           ? 'Unsubscribe opens the sender’s own page or a pre-filled email — nothing is sent without you.'
           : 'No unsubscribe link found. Use “Find in Gmail” to archive or filter these in bulk.'}
       </p>
+
+      <Activity s={s} refTime={refTime} />
 
       {s.subjects.length > 0 && (
         <section className="mt-6">
