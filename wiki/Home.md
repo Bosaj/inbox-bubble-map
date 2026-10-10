@@ -1,9 +1,11 @@
 # Inbox Bubble Map — Wiki
 
-> See your email as a graph: you in the center, every newsletter and service that emails you as a connected bubble — then clean up.
+> See your inbox as a bubble map of senders, then clean up. Runs entirely in the browser.
+
+**Live app:** https://inbox-bubble-map.vercel.app
 
 ## Pages
-- [[1-Architecture]] — how the system is meant to fit together
+- [[1-Architecture]] — data flow, privacy model, modules
 - [[2-Roadmap]] — milestones and status
 
-See the repository [README](../README.md) for the full context, prior art, and the LLM-handoff notes.
+See the repository [README](https://github.com/Bosaj/inbox-bubble-map#readme) for screenshots and how to read the map.

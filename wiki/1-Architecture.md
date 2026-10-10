@@ -1,15 +1,19 @@
 # 1. Architecture
 
-1. OAuth to Gmail (read-only) → fetch message metadata only (From, List-Unsubscribe).
-2. Aggregate by sender/domain → counts, last-seen, unsubscribe link present?
-3. Render a force-directed graph: central "you" node, sender bubbles sized by volume.
-4. Click a bubble → unsubscribe (via List-Unsubscribe) or bulk-archive/delete.
+Static, client-side React + Vite app. No backend, analytics or persistence beyond the theme setting.
 
-## Proposed stack
-- Gmail API (OAuth, read-only scope first)
-- Parse From + List-Unsubscribe headers; aggregate by sender/domain
-- Visualization: react-force-graph / d3-force
-- Privacy: process locally in the browser, store nothing server-side
+## Data flow
+1. **Import.** Either a `.mbox`/`.eml` file streamed in a Web Worker (`parse.worker.ts` → `MboxParser`), or the optional Gmail API (`gmail.ts`, `gmail.metadata` scope).
+2. **Headers to `MessageMeta`.** From, Date, Subject, List-Unsubscribe(-Post), List-Id, Precedence and Gmail labels (`headers.ts`).
+3. **Aggregate.** Messages are grouped by company (root domain) or by address. Each sender gets a count, unread count, first/last seen, a category (bulk, automated or people), unsubscribe targets and recent subjects (`aggregate.ts`).
+4. **Layout.** A deterministic d3-force simulation runs synchronously (`layout.ts`). The radial force uses log(days since last message), collision keeps bubbles apart and a weak sector force groups the categories.
+5. **UI.** SVG map with d3-zoom, side panel, sortable table, cleanup list and CSV export.
 
-## Open bases to fork
-- **(none for the graph)** — Unsubscribe tools are closed-source; build the viz yourself on the Gmail API.
+## Privacy model
+- Message bodies are skipped during parsing, never stored.
+- The Gmail token lives in memory only. Requests go straight from the browser to `gmail.googleapis.com`.
+- Unsubscribe URLs come from the emails and are only opened on click. Only `https:` and `mailto:` links are accepted.
+- Vercel serves a strict CSP: same-origin scripts, plus Google Identity Services only when Gmail connect is used.
+
+## Why three colours
+The bubble map is an all-pairs chart (any bubble can sit next to any other). Validation showed three hues are the most that stay distinguishable for colour-blind readers too. Filters, labels and the table view carry the rest.
