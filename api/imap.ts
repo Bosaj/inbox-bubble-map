@@ -12,8 +12,10 @@
  * and a lockout after repeated login failures.
  */
 import { ImapFlow } from 'imapflow'
-import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
+import { HOSTNAME, isPrivateAddress, resolvePublic, type Resolver } from './_lib/net.js'
+
+export { isPrivateAddress, resolvePublic }
 
 export const HEADER_FIELDS = ['from', 'date', 'subject', 'list-unsubscribe', 'list-unsubscribe-post', 'list-id', 'precedence']
 const MAX_BODY = 4096
@@ -35,8 +37,6 @@ export interface RelayMessage {
 
 /* ---------- validation ---------- */
 
-const HOSTNAME = /^(?=.{4,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i
-
 export function validate(body: unknown): RelayRequest | string {
   if (!body || typeof body !== 'object') return 'Invalid request'
   const b = body as Record<string, unknown>
@@ -51,41 +51,6 @@ export function validate(body: unknown): RelayRequest | string {
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) return `Messages must be between 1 and ${MAX_LIMIT}`
   if (mailbox.length > 200 || /[\r\n\0]/.test(mailbox)) return 'Invalid mailbox name'
   return { host, email, password, limit, mailbox }
-}
-
-/** True for addresses a public IMAP server can't have (SSRF guard). */
-export function isPrivateAddress(addr: string): boolean {
-  if (isIP(addr) === 4) {
-    const [a, b] = addr.split('.').map(Number) as [number, number]
-    return (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 100 && b >= 64 && b <= 127) || // CGNAT
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 192 && b === 0) ||
-      (a === 198 && (b === 18 || b === 19)) ||
-      a >= 224
-    )
-  }
-  const v6 = addr.toLowerCase()
-  if (v6.startsWith('::ffff:')) return isPrivateAddress(v6.slice(7))
-  return v6 === '::' || v6 === '::1' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe8') || v6.startsWith('fe9') || v6.startsWith('fea') || v6.startsWith('feb') || v6.startsWith('ff')
-}
-
-type Resolver = (host: string) => Promise<{ address: string; family: number }[]>
-const defaultResolver: Resolver = (host) => lookup(host, { all: true, verbatim: true })
-
-export async function resolvePublic(host: string, resolve: Resolver = defaultResolver): Promise<string | null> {
-  try {
-    const addrs = await resolve(host)
-    if (!addrs.length || addrs.some((a) => isPrivateAddress(a.address))) return null
-    return addrs[0]!.address
-  } catch {
-    return null
-  }
 }
 
 /* ---------- rate limiting (per warm instance; Vercel Firewall adds a global rule) ---------- */
