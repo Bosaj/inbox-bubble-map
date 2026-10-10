@@ -8,3 +8,7 @@ build/
 .DS_Store
 .vite/
 coverage/
+
+# local-only Python prototype (superseded by the web app)
+.prototype-python/
+*.tsbuildinfo
