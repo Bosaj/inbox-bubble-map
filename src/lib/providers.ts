@@ -1,5 +1,6 @@
 import { parseEml } from './mbox'
 import type { MessageMeta } from './headers'
+import { BULK_CAP, chunk, MailError, type MailAction, type MailBody, type Mailbox } from './mailbox'
 
 export type ProviderId = 'gmail' | 'outlook' | 'yahoo' | 'icloud' | 'gmx' | 'zoho' | 'fastmail' | 'aol' | 'other'
 
@@ -98,19 +99,50 @@ interface RelayMessage {
   h: string
   seen: boolean
   date?: number
+  uid?: number
+}
+
+async function relay<T>(payload: Record<string, unknown>, fetchImpl: typeof fetch, signal?: AbortSignal): Promise<T> {
+  const res = await fetchImpl('/api/imap', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal })
+  const data = (await res.json().catch(() => ({}))) as T & { error?: string; message?: string }
+  if (!res.ok) throw new MailError(data.error ?? 'generic', data.message ?? `The mail relay failed (${res.status}).`)
+  return data
 }
 
 /** Ask this site's relay function to read message headers over IMAP. */
 export async function fetchViaImap(opts: ImapOptions, fetchImpl: typeof fetch = fetch): Promise<MessageMeta[]> {
-  const res = await fetchImpl('/api/imap', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ host: opts.host, email: opts.email, password: opts.password, limit: opts.limit, mailbox: opts.mailbox }),
-    signal: opts.signal,
-  })
-  const data = (await res.json().catch(() => ({}))) as { messages?: RelayMessage[]; message?: string }
-  if (!res.ok) throw new Error(data.message ?? `The mail relay failed (${res.status}).`)
+  const data = await relay<{ messages?: RelayMessage[] }>({ host: opts.host, email: opts.email, password: opts.password, limit: opts.limit, mailbox: opts.mailbox }, fetchImpl, opts.signal)
   return relayToMeta(data.messages ?? [])
+}
+
+/**
+ * IMAP mailbox through the relay. The credentials stay in this closure (tab
+ * memory) and are sent with each request, because the relay keeps nothing.
+ */
+export function imapMailbox(opts: Omit<ImapOptions, 'limit' | 'signal'>, fetchImpl: typeof fetch = fetch): Mailbox {
+  const auth = { host: opts.host, email: opts.email, password: opts.password, mailbox: opts.mailbox }
+  return {
+    kind: 'imap',
+    async list(emails, limit = 20) {
+      return relay<{ items: { id: string; subject: string; from: string; date: number; unread: boolean }[]; total: number }>({ ...auth, action: 'list', emails, limit }, fetchImpl)
+    },
+    async ids(emails, cap = BULK_CAP) {
+      const data = await relay<{ ids: string[] }>({ ...auth, action: 'ids', emails, limit: cap }, fetchImpl)
+      return data.ids
+    },
+    async body(id) {
+      return relay<MailBody>({ ...auth, action: 'body', uid: Number(id) }, fetchImpl)
+    },
+    async act(ids, action: MailAction, onProgress) {
+      let done = 0
+      for (const part of chunk(ids, 1000)) {
+        const data = await relay<{ done: number }>({ ...auth, action: 'act', op: action, uids: part.map(Number) }, fetchImpl)
+        done += data.done
+        onProgress?.(done)
+      }
+      return done
+    },
+  }
 }
 
 export function relayToMeta(messages: RelayMessage[]): MessageMeta[] {
@@ -120,6 +152,7 @@ export function relayToMeta(messages: RelayMessage[]): MessageMeta[] {
     if (!meta) continue
     if (!meta.date && m.date) meta.date = m.date
     meta.labels = m.seen ? ['opened'] : ['unread']
+    if (m.uid) meta.id = String(m.uid)
     out.push(meta)
   }
   return out

@@ -7,7 +7,8 @@ import { Maximize2, Minus, Plus } from 'lucide-react'
 import type { Sender } from '../lib/aggregate'
 import { applyForces, centerNode, CENTER_ID, makeBubble, makeScale, SECTOR, type Bubble } from '../lib/layout'
 import { CATEGORY_VAR, CLUSTER, fillFor, initials, logoDomain, type ColorBy, type LayoutMode } from '../lib/display'
-import { ago, CATEGORY_META, Dot, num, pct } from './ui'
+import { ago, Dot, num, pct } from './ui'
+import { useI18n } from '../i18n'
 
 interface Props {
   senders: Sender[]
@@ -79,6 +80,7 @@ type Drag = { ids: string[]; offsets: Map<string, { x: number; y: number }>; sta
 
 export function BubbleMap(props: Props) {
   const { senders, selected, onSelect, matches, popping, svgRef: externalRef, colorBy, layout, logos, multi, onMulti, tool, unpinToken, onPinned } = props
+  const { t: tx } = useI18n()
   const scale = useMemo(() => makeScale(senders, SIZE), [senders])
   const ownRef = useRef<SVGSVGElement>(null)
   const svgRef = externalRef ?? ownRef
@@ -330,7 +332,7 @@ export function BubbleMap(props: Props) {
         viewBox={`${-HALF} ${-HALF} ${HALF * 2} ${HALF * 2}`}
         className={`h-full w-full touch-none select-none ${tool === 'select' ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
         role="img"
-        aria-label={`Bubble map of ${senders.length} senders. Bubble size is message count; ${layout === 'orbit' ? 'distance from the centre is how long ago they last wrote' : 'bubbles are grouped by type'}.`}
+        aria-label={tx.mapAria(senders.length, layout === 'orbit')}
         onClick={(ev) => ev.target === svgRef.current && !rect && onSelect(null)}
         onPointerDown={onSvgDown}
         onPointerMove={onSvgMove}
@@ -502,7 +504,7 @@ export function BubbleMap(props: Props) {
                 pointerEvents="none"
                 aria-hidden
               >
-                {CATEGORY_META[c].label}
+                {tx.cat[c].label}
               </text>
             ))}
 
@@ -542,33 +544,33 @@ export function BubbleMap(props: Props) {
           <p className="truncate text-[12px] text-ink-3">{hover.s.domain}</p>
           <dl className="tabular mt-2 grid grid-cols-3 gap-2">
             <div>
-              <dt className="text-[11px] text-ink-3">Messages</dt>
+              <dt className="text-[11px] text-ink-3">{tx.tipMessages}</dt>
               <dd className="font-semibold">{num(hover.s.count)}</dd>
             </div>
             <div>
-              <dt className="text-[11px] text-ink-3">Unread</dt>
+              <dt className="text-[11px] text-ink-3">{tx.tipUnread}</dt>
               <dd className="font-semibold">{pct(hover.s.count ? hover.s.unread / hover.s.count : 0)}</dd>
             </div>
             <div>
-              <dt className="text-[11px] text-ink-3">Last</dt>
+              <dt className="text-[11px] text-ink-3">{tx.tipLast}</dt>
               <dd className="font-semibold">{ago(hover.s.last)}</dd>
             </div>
           </dl>
           <p className="mt-2 text-[12px] text-ink-2">
-            {hover.s.unsubHttp || hover.s.unsubMailto ? '✓ Has an unsubscribe link' : CATEGORY_META[hover.s.category].label}
-            {pinnedRef.current.has(hover.s.key) && ' · pinned (double-click to release)'}
+            {hover.s.unsubHttp || hover.s.unsubMailto ? tx.tipHasLink : tx.cat[hover.s.category].label}
+            {pinnedRef.current.has(hover.s.key) && tx.tipPinned}
           </p>
         </div>
       )}
 
       <div className="glass absolute bottom-3 end-3 flex flex-col overflow-hidden rounded-2xl border border-line">
-        <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => zoomBy(1.4)} className="press grid size-10 place-items-center text-ink-2 hover:bg-surface-2 hover:text-ink">
+        <button type="button" aria-label={tx.zoomIn} title={tx.zoomIn} onClick={() => zoomBy(1.4)} className="press grid size-10 place-items-center text-ink-2 hover:bg-surface-2 hover:text-ink">
           <Plus size={17} />
         </button>
-        <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => zoomBy(1 / 1.4)} className="press grid size-10 place-items-center border-y border-line text-ink-2 hover:bg-surface-2 hover:text-ink">
+        <button type="button" aria-label={tx.zoomOut} title={tx.zoomOut} onClick={() => zoomBy(1 / 1.4)} className="press grid size-10 place-items-center border-y border-line text-ink-2 hover:bg-surface-2 hover:text-ink">
           <Minus size={17} />
         </button>
-        <button type="button" aria-label="Reset view" title="Reset view" onClick={reset} className="press grid size-10 place-items-center text-ink-2 hover:bg-surface-2 hover:text-ink">
+        <button type="button" aria-label={tx.resetView} title={tx.resetView} onClick={reset} className="press grid size-10 place-items-center text-ink-2 hover:bg-surface-2 hover:text-ink">
           <Maximize2 size={15} />
         </button>
       </div>

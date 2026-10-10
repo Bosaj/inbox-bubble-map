@@ -1,6 +1,7 @@
 import { BellOff, Mailbox, PieChart, Sparkles } from 'lucide-react'
 import type { Insights as Data, Sender } from '../lib/aggregate'
 import { num, pct } from './ui'
+import { useI18n } from '../i18n'
 
 function Tile({ icon, value, label, onClick }: { icon: React.ReactNode; value: string; label: string; onClick?: () => void }) {
   const body = (
@@ -22,18 +23,19 @@ function Tile({ icon, value, label, onClick }: { icon: React.ReactNode; value: s
 }
 
 export function Insights({ data, cleaned, onSelect }: { data: Data; cleaned: number; onSelect: (s: Sender) => void }) {
+  const { t } = useI18n()
   const worst = data.neverOpened[0]
   return (
-    <section aria-label="Inbox insights" className="enter mb-5 grid grid-cols-2 gap-2">
-      <Tile icon={<PieChart size={16} />} value={pct(data.listShare)} label="of your mail comes from mailing lists" />
-      <Tile icon={<Mailbox size={16} />} value={`${num(Math.round(data.listPerWeek))}/wk`} label="list emails arriving each week" />
+    <section aria-label={t.insights} className="enter mb-5 grid grid-cols-2 gap-2">
+      <Tile icon={<PieChart size={16} />} value={pct(data.listShare)} label={t.insListShare} />
+      <Tile icon={<Mailbox size={16} />} value={`${num(Math.round(data.listPerWeek))}${t.perWeekShort}`} label={t.insPerWeek} />
       <Tile
         icon={<BellOff size={16} />}
         value={num(data.neverOpened.length)}
-        label={worst ? `senders you never open, like ${worst.label}` : 'senders you never open'}
+        label={t.insNever(worst?.label)}
         onClick={worst ? () => onSelect(worst) : undefined}
       />
-      <Tile icon={<Sparkles size={16} />} value={data.cleanupPerYear ? `−${num(data.cleanupPerYear)}` : pct(data.top5Share)} label={data.cleanupPerYear ? `emails a year once your cleanup list is done${cleaned ? ` · ${cleaned} popped` : ''}` : 'of all mail comes from your top 5 senders'} />
+      <Tile icon={<Sparkles size={16} />} value={data.cleanupPerYear ? `−${num(data.cleanupPerYear)}` : pct(data.top5Share)} label={data.cleanupPerYear ? t.insCleanup(cleaned) : t.insTop5} />
     </section>
   )
 }

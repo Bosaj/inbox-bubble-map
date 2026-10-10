@@ -18,6 +18,19 @@
       ]
     },
     {
+      "source": "/api/unsubscribe",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex"
+        }
+      ]
+    },
+    {
       "source": "/assets/(.*)",
       "headers": [
         {
@@ -59,6 +72,9 @@
   "functions": {
     "api/imap.ts": {
       "maxDuration": 60
+    },
+    "api/unsubscribe.ts": {
+      "maxDuration": 15
     }
   }
 }
