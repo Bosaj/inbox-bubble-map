@@ -4,6 +4,16 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-11
+### Added
+- Stay signed in: Gmail sign-in through `/api/google/login` → `/callback` (OAuth code flow with PKCE). The refresh token is sealed (AES-256-GCM, HKDF key) into an httpOnly, Secure, SameSite=Lax cookie; `/api/google/session` hands out short-lived access tokens and logs out (revokes at Google). Nothing is stored on the server. Falls back to the popup sign-in when `GOOGLE_CLIENT_SECRET` is not set. (#27)
+- On-device cache (IndexedDB) of the signed-in mailbox: the map opens instantly on return. (#27)
+- Incremental sync with the Gmail History API: only new mail, read-state changes, trash and spam since the last visit; a full rebuild when the checkpoint is too old. (#27)
+- Account menu: who is signed in, last sync, *Sync now*, *Load 2,000 older messages*, *Log out* (revokes access and erases the cache). A "Welcome back" card resumes a cached account. All in Arabic, French and English. (#27)
+
+### Changed
+- The Gmail map only counts received mail (`-in:sent -in:draft -in:chats`), so your own address no longer shows up as a sender.
+
 ## [0.7.2] - 2026-10-11
 ### Fixed
 - Opening a sender while a Gmail import was still streaming hit `403 rateLimitExceeded`: the import and the sender panel had separate throttles, so together they went over Gmail's per-user limit. They now share one throttle; clicks jump the queue and the background import slows to make room. The import starts at 30 reads/s and slows down once per burst of rate-limit answers instead of once per failed request. (#25)

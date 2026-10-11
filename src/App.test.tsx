@@ -2,6 +2,8 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import App from './App'
+import { saveAccount } from './lib/store'
+import { demoMessages } from './lib/demo'
 
 beforeEach(() => {
   localStorage.clear()
@@ -83,5 +85,14 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: /Explorer une boîte de démonstration/ }))
     expect(screen.getByRole('img', { name: /Carte de 29 expéditeurs/ })).toBeInTheDocument()
     expect(localStorage.getItem('ibm:lang')).toBe('fr')
+  })
+
+  it('offers to resume a cached account and can remove it from the device', async () => {
+    await saveAccount({ id: 'gmail:me@gmail.com', kind: 'gmail', email: 'me@gmail.com', historyId: '1', limit: 2000, messages: demoMessages().slice(0, 50), syncedAt: Date.now() })
+    render(<App />)
+    expect(await screen.findByText('Welcome back')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Continue as me@gmail.com/ })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Remove from this device/ }))
+    await waitFor(() => expect(screen.queryByText('Welcome back')).toBeNull())
   })
 })

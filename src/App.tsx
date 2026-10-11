@@ -10,7 +10,10 @@ import { ConnectDialog, type ImapForm } from './components/ConnectDialog'
 import { Insights } from './components/Insights'
 import type { MessageMeta } from './lib/headers'
 import { demoMessages } from './lib/demo'
-import { fetchGmailMetadata, gmailClientId, gmailMailbox, requestGmailToken, Throttle } from './lib/gmail'
+import { applyChanges, fetchGmailMessages, fetchGmailMetadata, gmailChanges, gmailClientId, gmailMailbox, gmailProfile, requestGmailToken, Throttle, type TokenFn } from './lib/gmail'
+import { googleLogout, googleStatus, serverTokenSource, startGoogleLogin, type GoogleStatus } from './lib/account'
+import { accountId, deleteAccount, lastAccountId, loadAccount, saveAccount, type CachedAccount } from './lib/store'
+import { AccountMenu } from './components/AccountMenu'
 import { applyToMessages, cleanSender, demoMailbox, type MailAction, type Mailbox } from './lib/mailbox'
 import type { WorkerOut } from './lib/parse.worker'
 import { ImportScreen, type Progress } from './components/ImportScreen'
@@ -89,6 +92,12 @@ export default function App() {
   const [groupProgress, setGroupProgress] = useState<string | null>(null)
   const [stream, setStream] = useState<{ done: number; total: number } | null>(null)
   const streamRef = useRef<AbortController | null>(null)
+  /** Signed-in Gmail account (stays signed in through the server session, or this tab only via a popup token). */
+  const [account, setAccount] = useState<{ id: string; email: string; name?: string; mode: 'server' | 'popup'; syncedAt: number } | null>(null)
+  const accountRef = useRef<{ getToken: TokenFn; throttle: Throttle; historyId?: string; limit: number } | null>(null)
+  const [googleCfg, setGoogleCfg] = useState<GoogleStatus | null>(null)
+  const [resume, setResume] = useState<CachedAccount | null>(null)
+  const [syncing, setSyncing] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const worker = useRef<Worker | null>(null)
@@ -193,54 +202,226 @@ export default function App() {
     [load, t],
   )
 
-  /** Gmail streams: the map opens after the first ~200 messages and keeps growing while the rest load. */
+  /** Full import of the newest `limit` received messages, streamed into the map, then cached on this device. */
+  const fullGmailImport = useCallback(
+    async (email: string, name: string | undefined, getToken: TokenFn, box: Mailbox, throttle: Throttle, limit: number, mode: 'server' | 'popup') => {
+      streamRef.current?.abort()
+      const ctrl = new AbortController()
+      streamRef.current = ctrl
+      let shown = false
+      try {
+        setProgress({ label: t.readingGmail, done: 0, total: 1, messages: 0 })
+        // checkpoint first, so nothing that arrives during the import is missed by the next sync
+        const profile = await gmailProfile(getToken, fetch, throttle)
+        const all = await fetchGmailMetadata(getToken, {
+          limit,
+          throttle,
+          signal: ctrl.signal,
+          onProgress: (p) => (shown ? setStream(p) : setProgress({ label: t.readingGmail, done: p.done, total: p.total, messages: p.done })),
+          onChunk: (msgs, p) => {
+            if (ctrl.signal.aborted) return
+            if (!shown) {
+              shown = true
+              load(msgs, { kind: 'live', name: 'Gmail', count: msgs.length }, box)
+              setAccount({ id: accountId('gmail', email), email, name, mode, syncedAt: Date.now() })
+              setStream(p)
+              setConnecting(false)
+            } else setMessages((prev) => (prev ? [...prev, ...msgs] : msgs))
+          },
+        })
+        if (ctrl.signal.aborted) return
+        if (!all.length) throw new Error(t.emptyMailbox)
+        if (!shown) {
+          load(all, { kind: 'live', name: 'Gmail', count: all.length }, box)
+          setAccount({ id: accountId('gmail', email), email, name, mode, syncedAt: Date.now() })
+        }
+        accountRef.current = { getToken, throttle, historyId: profile.historyId, limit }
+        setSource({ kind: 'live', name: 'Gmail', count: all.length })
+        await saveAccount({ id: accountId('gmail', email), kind: 'gmail', email, name, historyId: profile.historyId, limit, messages: all, syncedAt: Date.now() })
+      } catch (err) {
+        if ((err as Error).name === 'AbortError' || ctrl.signal.aborted) return
+        if (shown) setNotice(t.stoppedAt(num(messagesRef.current.length), errorText(err, t)))
+        else {
+          setConnectError(errorText(err, t))
+          setError(errorText(err, t))
+          setProgress(null)
+        }
+      } finally {
+        setConnecting(false)
+        setStream(null)
+        if (streamRef.current === ctrl) streamRef.current = null
+      }
+    },
+    [load, t],
+  )
+
+  /** Only what changed since the last visit (Gmail history), merged into the cached map. */
+  const syncGmail = useCallback(
+    async (quiet = false) => {
+      const ref = accountRef.current
+      const acc = account
+      if (!ref || !acc || syncing) return
+      setSyncing(true)
+      try {
+        const changes = ref.historyId ? await gmailChanges(ref.getToken, ref.historyId, fetch, ref.throttle) : null
+        if (!changes) {
+          // checkpoint expired (about a week without a visit): rebuild from scratch
+          await fullGmailImport(acc.email, acc.name, ref.getToken, mailbox!, ref.throttle, ref.limit, acc.mode)
+          return
+        }
+        const fresh = await fetchGmailMessages(ref.getToken, changes.added, { throttle: ref.throttle })
+        ref.historyId = changes.historyId
+        setMessages((prev) => (prev ? applyChanges(prev, changes, fresh) : prev))
+        setAccount((a) => (a ? { ...a, syncedAt: Date.now() } : a))
+        if (!quiet || fresh.length) setNotice(fresh.length ? t.account.newMail(num(fresh.length)) : t.account.upToDate)
+      } catch (err) {
+        setNotice(t.failed(errorText(err, t)))
+      } finally {
+        setSyncing(false)
+      }
+    },
+    [account, syncing, fullGmailImport, mailbox, t],
+  )
+
+  /** Open a Gmail account: cached map first (instant), then sync in the background; or a first full import. */
+  const openGmail = useCallback(
+    async (email: string, name: string | undefined, getToken: TokenFn, mode: 'server' | 'popup', reauth?: () => Promise<void>) => {
+      const id = accountId('gmail', email)
+      const throttle = new Throttle(30)
+      const box = gmailMailbox({ getToken, reauth, throttle })
+      const cached = await loadAccount(id)
+      setResume(null)
+      if (cached?.messages.length) {
+        accountRef.current = { getToken, throttle, historyId: cached.historyId, limit: cached.limit }
+        load(cached.messages, { kind: 'live', name: 'Gmail', count: cached.messages.length }, box)
+        setAccount({ id, email, name: name ?? cached.name, mode, syncedAt: cached.syncedAt })
+        return
+      }
+      setConnecting(true)
+      await fullGmailImport(email, name, getToken, box, throttle, 2000, mode)
+    },
+    [load, fullGmailImport],
+  )
+
+  // background sync right after a cached map opens
+  const syncedOnce = useRef<string | null>(null)
+  useEffect(() => {
+    if (account && mailbox && syncedOnce.current !== account.id && accountRef.current?.historyId) {
+      syncedOnce.current = account.id
+      void syncGmail(true)
+    }
+  }, [account, mailbox, syncGmail])
+
+  // keep the on-device cache in step with the map (actions, syncs, older mail)
+  useEffect(() => {
+    if (!account || !messages || !accountRef.current) return
+    const ref = accountRef.current
+    const id = setTimeout(() => {
+      void saveAccount({ id: account.id, kind: 'gmail', email: account.email, name: account.name, historyId: ref.historyId, limit: ref.limit, messages, syncedAt: account.syncedAt })
+    }, 800)
+    return () => clearTimeout(id)
+  }, [messages, account])
+
+  /** Startup: stay signed in through the server session, or offer to resume a cached account. */
+  useEffect(() => {
+    let live = true
+    const params = new URLSearchParams(location.search)
+    const auth = params.get('auth')
+    if (auth) {
+      history.replaceState(null, '', location.pathname)
+      if (auth !== 'google') setError(t.authErrors[auth] ?? t.errors.generic!)
+    }
+    void (async () => {
+      const status = await googleStatus()
+      if (!live) return
+      setGoogleCfg(status)
+      if (status.signedIn && status.email) {
+        const email = status.email
+        await openGmail(email, status.name ?? undefined, serverTokenSource(), 'server', async () => startGoogleLogin(email))
+        return
+      }
+      const last = lastAccountId()
+      const cached = last ? await loadAccount(last) : null
+      if (live && cached) setResume(cached)
+    })()
+    return () => {
+      live = false
+    }
+    // once on startup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /** "Sign in with Google": full-page server login when configured (stays signed in), popup otherwise (this tab only). */
   const onGoogle = gmailClientId
-    ? async (limit: number) => {
+    ? async (limit: number, hint?: string) => {
+        if (googleCfg?.configured) {
+          startGoogleLogin(hint)
+          return
+        }
         setConnectError(null)
         setConnecting(true)
-        streamRef.current?.abort()
-        const ctrl = new AbortController()
-        streamRef.current = ctrl
-        let shown = false
         try {
           setProgress({ label: t.waitGoogle, done: 0, total: 1, messages: 0 })
-          const token = await requestGmailToken(gmailClientId!)
-          // one throttle for the import and the sender panel, so both together stay under Gmail's limit
-          const throttle = new Throttle(30)
-          const box = gmailMailbox(token, gmailClientId!, fetch, throttle)
-          const all = await fetchGmailMetadata(token, {
-            limit,
-            throttle,
-            signal: ctrl.signal,
-            onProgress: (p) => (shown ? setStream(p) : setProgress({ label: t.readingGmail, done: p.done, total: p.total, messages: p.done })),
-            onChunk: (msgs, p) => {
-              if (ctrl.signal.aborted) return
-              if (!shown) {
-                shown = true
-                load(msgs, { kind: 'live', name: 'Gmail', count: msgs.length }, box)
-                setStream(p)
-                setConnecting(false)
-              } else setMessages((prev) => (prev ? [...prev, ...msgs] : msgs))
-            },
-          })
-          if (ctrl.signal.aborted) return
-          if (!all.length) throw new Error(t.emptyMailbox)
-          if (!shown) load(all, { kind: 'live', name: 'Gmail', count: all.length }, box)
-          setSource({ kind: 'live', name: 'Gmail', count: all.length })
-        } catch (err) {
-          if ((err as Error).name === 'AbortError' || ctrl.signal.aborted) return
-          if (shown) setNotice(t.stoppedAt(num(messagesRef.current.length), errorText(err, t)))
-          else {
-            setConnectError(errorText(err, t))
-            setProgress(null)
+          let token = await requestGmailToken(gmailClientId!)
+          const getToken: TokenFn = async () => token
+          const reauth = async () => {
+            token = await requestGmailToken(gmailClientId!, '')
           }
-        } finally {
+          const profile = await gmailProfile(getToken)
+          const id = accountId('gmail', profile.emailAddress)
+          const cached = await loadAccount(id)
+          if (cached?.messages.length) await openGmail(profile.emailAddress, undefined, getToken, 'popup', reauth)
+          else {
+            const throttle = new Throttle(30)
+            await fullGmailImport(profile.emailAddress, undefined, getToken, gmailMailbox({ getToken, reauth, throttle }), throttle, limit, 'popup')
+          }
+        } catch (err) {
+          setConnectError(errorText(err, t))
+          setProgress(null)
           setConnecting(false)
-          setStream(null)
-          if (streamRef.current === ctrl) streamRef.current = null
         }
       }
     : undefined
+
+  /** Fetch the next older messages (beyond what's cached), skipping ones already on the map. */
+  const loadOlder = async () => {
+    const ref = accountRef.current
+    if (!ref || !account || syncing) return
+    setSyncing(true)
+    const limit = ref.limit + 2000
+    try {
+      const known = new Set(messagesRef.current.map((m) => m.id).filter((x): x is string => Boolean(x)))
+      const more = await fetchGmailMetadata(ref.getToken, {
+        limit,
+        skip: known,
+        throttle: ref.throttle,
+        onProgress: (p) => setStream(p),
+        onChunk: (msgs) => setMessages((prev) => (prev ? [...prev, ...msgs] : msgs)),
+      })
+      ref.limit = limit
+      setSource({ kind: 'live', name: 'Gmail', count: messagesRef.current.length })
+      setNotice(t.account.olderLoaded(num(more.length)))
+    } catch (err) {
+      setNotice(t.failed(errorText(err, t)))
+    } finally {
+      setStream(null)
+      setSyncing(false)
+    }
+  }
+
+  /** Log out: revoke Google's grant, erase this mailbox from the device, back to the start screen. */
+  const logout = async () => {
+    streamRef.current?.abort()
+    if (account?.mode === 'server') await googleLogout()
+    if (account) await deleteAccount(account.id)
+    accountRef.current = null
+    syncedOnce.current = null
+    setAccount(null)
+    setStream(null)
+    setMailbox(null)
+    setMessages(null)
+    setGoogleCfg((c) => (c ? { ...c, signedIn: false, email: null, name: null } : c))
+  }
 
   const onMicrosoft = msClientId
     ? (limit: number) =>
@@ -388,6 +569,19 @@ export default function App() {
         <ImportScreen
           onFiles={onFiles}
           onDemo={onDemo}
+          resume={
+            resume
+              ? {
+                  email: resume.email,
+                  count: resume.messages.length,
+                  onContinue: () => (googleCfg?.configured ? startGoogleLogin(resume.email) : onGoogle?.(resume.limit, resume.email)),
+                  onForget: async () => {
+                    await deleteAccount(resume.id)
+                    setResume(null)
+                  },
+                }
+              : null
+          }
           onProvider={(p) => {
             setConnectError(null)
             setProvider(p)
@@ -396,6 +590,7 @@ export default function App() {
           error={error === 'noSenders' ? t.noSenders : error}
         />
         <ConnectDialog
+          staySignedIn={Boolean(googleCfg?.configured)}
           provider={provider}
           onClose={() => !connecting && setProvider(null)}
           onImap={onImap}
@@ -425,7 +620,11 @@ export default function App() {
               {t.brand.after}
             </p>
             <p className="truncate text-[12px] text-ink-3">
-              {stream ? (
+              {syncing && !stream ? (
+                <span role="status" className="inline-flex items-center gap-1.5 text-accent">
+                  <span className="inline-block size-2 animate-pulse rounded-full bg-accent" /> {t.account.syncing}
+                </span>
+              ) : stream ? (
                 <span role="status" className="tabular inline-flex items-center gap-1.5 text-accent">
                   <span className="inline-block size-2 animate-pulse rounded-full bg-accent" /> {t.loadingMore(num(stream.done), num(stream.total))}
                 </span>
@@ -483,19 +682,23 @@ export default function App() {
               </div>
             )}
           </div>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              streamRef.current?.abort()
-              setStream(null)
-              setMessages(null)
-              setMailbox(null)
-            }}
-            title={t.newImportHint}
-          >
-            <RotateCcw size={15} /> <span className="hidden sm:inline">{t.newImport}</span>
-          </Button>
+          {account ? (
+            <AccountMenu email={account.email} name={account.name} syncedAt={account.syncedAt} staySignedIn={account.mode === 'server'} busy={syncing || Boolean(stream)} onSync={() => void syncGmail()} onOlder={() => void loadOlder()} onLogout={() => void logout()} />
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                streamRef.current?.abort()
+                setStream(null)
+                setMessages(null)
+                setMailbox(null)
+              }}
+              title={t.newImportHint}
+            >
+              <RotateCcw size={15} /> <span className="hidden sm:inline">{t.newImport}</span>
+            </Button>
+          )}
           <LangSwitch />
           <button type="button" onClick={cycleTheme} aria-label={t.theme} title={`${t.theme}: ${t.themeName[theme]}`} className="press grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 hover:text-ink">
             {theme === 'system' ? <SunMoon size={17} /> : theme === 'light' ? <Sun size={17} /> : <Moon size={17} />}
