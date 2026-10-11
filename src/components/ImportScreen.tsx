@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ChevronDown, FileUp, Lock, Sparkles } from 'lucide-react'
+import { ChevronDown, FileUp, Lock, LogIn, Sparkles, Trash2 } from 'lucide-react'
 import { PROVIDERS, type Provider } from '../lib/providers'
 import { Button, num } from './ui'
 import { LangSwitch } from './LangSwitch'
@@ -12,7 +12,15 @@ export interface Progress {
   messages: number
 }
 
+export interface Resume {
+  email: string
+  count: number
+  onContinue: () => void
+  onForget: () => void
+}
+
 interface Props {
+  resume?: Resume | null
   onFiles: (files: File[]) => void
   onDemo: () => void
   onProvider: (p: Provider) => void
@@ -34,7 +42,7 @@ function Logo() {
   )
 }
 
-export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: Props) {
+export function ImportScreen({ resume, onFiles, onDemo, onProvider, progress, error }: Props) {
   const { t } = useI18n()
   const input = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
@@ -106,6 +114,18 @@ export function ImportScreen({ onFiles, onDemo, onProvider, progress, error }: P
               </div>
             ) : (
               <>
+                {resume && (
+                  <div className="enter mb-4 rounded-[20px] border border-accent/40 bg-accent-soft p-4">
+                    <p className="text-[14px] font-semibold">{t.account.welcomeBack}</p>
+                    <p className="mt-0.5 text-[12.5px] text-ink-2">{t.account.resumeHint(num(resume.count))}</p>
+                    <Button variant="primary" className="mt-3 w-full" onClick={resume.onContinue}>
+                      <LogIn size={16} /> <span className="truncate">{t.account.continueAs(resume.email)}</span>
+                    </Button>
+                    <button type="button" onClick={resume.onForget} className="mt-2 inline-flex min-h-8 items-center gap-1.5 text-[12.5px] font-medium text-ink-3 hover:text-ink">
+                      <Trash2 size={13} /> {t.account.forget}
+                    </button>
+                  </div>
+                )}
                 <p className="mb-3 text-[14px] font-semibold">{t.connectInbox}</p>
                 <div className="grid grid-cols-2 gap-2">
                   {PROVIDERS.map((p) => (

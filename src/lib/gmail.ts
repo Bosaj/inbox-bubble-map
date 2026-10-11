@@ -181,51 +181,30 @@ export interface FetchProgress {
   total: number
 }
 
-/**
- * Fetch metadata for the newest `limit` messages.
- * Gmail allows about 50 message reads per second per user, so requests are
- * paced (default 40/s), and a rate-limit answer pauses and slows every worker.
- * `onChunk` streams results so the map can appear before everything arrived.
- * A message that keeps failing is skipped instead of failing the whole import.
- */
-export async function fetchGmailMetadata(
-  token: string,
-  {
-    limit = 2000,
-    concurrency = 12,
-    perSecond = 30,
-    throttle: shared,
-    onProgress,
-    onChunk,
-    chunkEvery = 1500,
-    signal,
-    fetchImpl = fetch,
-  }: {
-    limit?: number
-    concurrency?: number
-    perSecond?: number
-    /** Share one throttle with the mailbox so clicks during an import stay under Gmail's limit. */
-    throttle?: Throttle
-    onProgress?: (p: FetchProgress) => void
-    onChunk?: (msgs: MessageMeta[], p: FetchProgress) => void
-    chunkEvery?: number
-    signal?: AbortSignal
-    fetchImpl?: Fetch
-  } = {},
-): Promise<MessageMeta[]> {
-  const throttle = shared ?? new Throttle(perSecond)
-  const ids: string[] = []
-  let pageToken: string | undefined
-  do {
-    const url = new URL(`${API}/messages`)
-    url.searchParams.set('maxResults', String(Math.min(500, limit - ids.length)))
-    if (pageToken) url.searchParams.set('pageToken', pageToken)
-    const page = await call<{ messages?: { id: string }[]; nextPageToken?: string }>(url.toString(), token, fetchImpl, {}, throttle)
-    for (const m of page.messages ?? []) ids.push(m.id)
-    pageToken = page.nextPageToken
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-  } while (pageToken && ids.length < limit)
+/** A token, or a function that returns a fresh one (server session or GIS). */
+export type TokenFn = (force?: boolean) => Promise<string>
+const asTokenFn = (t: string | TokenFn): TokenFn => (typeof t === 'string' ? async () => t : t)
 
+/** Mail other people sent you: no sent mail, drafts or chats on the map. */
+export const RECEIVED = '-in:sent -in:draft -in:chats'
+
+interface StreamOpts {
+  concurrency?: number
+  throttle?: Throttle
+  onProgress?: (p: FetchProgress) => void
+  onChunk?: (msgs: MessageMeta[], p: FetchProgress) => void
+  chunkEvery?: number
+  signal?: AbortSignal
+  fetchImpl?: Fetch
+}
+
+/**
+ * Fetch metadata for these message ids. Gmail allows about 50 reads a second per
+ * user, so requests share a throttle and a rate-limit answer pauses everyone.
+ * `onChunk` streams results; a message that keeps failing is skipped.
+ */
+export async function fetchGmailMessages(token: string | TokenFn, ids: string[], { concurrency = 12, throttle = new Throttle(30), onProgress, onChunk, chunkEvery = 1500, signal, fetchImpl = fetch }: StreamOpts = {}): Promise<MessageMeta[]> {
+  const tok = asTokenFn(token)
   const out: MessageMeta[] = []
   let pending: MessageMeta[] = []
   let lastChunk = Date.now()
@@ -246,7 +225,7 @@ export async function fetchGmailMetadata(
   await pool(ids, concurrency, async (id) => {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     try {
-      const msg = await call<GmailMessage>(`${API}/messages/${id}?format=metadata&${qs}`, token, fetchImpl, {}, throttle)
+      const msg = await call<GmailMessage>(`${API}/messages/${id}?format=metadata&${qs}`, await tok(), fetchImpl, {}, throttle)
       const meta = metaFromGmail(msg)
       if (meta.fromEmail.includes('@')) {
         out.push(meta)
@@ -264,8 +243,136 @@ export async function fetchGmailMetadata(
     flush()
   })
   flush(true)
-  if (!out.length && lastError) throw lastError
+  if (!out.length && lastError && failed === ids.length) throw lastError
   return out
+}
+
+/** Ids of the newest `limit` received messages. */
+export async function listGmailIds(token: string | TokenFn, limit: number, { throttle, signal, fetchImpl = fetch, query = RECEIVED }: { throttle?: Throttle; signal?: AbortSignal; fetchImpl?: Fetch; query?: string } = {}): Promise<string[]> {
+  const tok = asTokenFn(token)
+  const ids: string[] = []
+  let pageToken: string | undefined
+  do {
+    const url = new URL(`${API}/messages`)
+    url.searchParams.set('maxResults', String(Math.min(500, limit - ids.length)))
+    if (query) url.searchParams.set('q', query)
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+    const page = await call<{ messages?: { id: string }[]; nextPageToken?: string }>(url.toString(), await tok(), fetchImpl, {}, throttle)
+    for (const m of page.messages ?? []) ids.push(m.id)
+    pageToken = page.nextPageToken
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  } while (pageToken && ids.length < limit)
+  return ids
+}
+
+/** Fetch metadata for the newest `limit` received messages, skipping ids already known. */
+export async function fetchGmailMetadata(
+  token: string | TokenFn,
+  { limit = 2000, perSecond = 30, skip, query, ...opts }: StreamOpts & { limit?: number; perSecond?: number; skip?: Set<string>; query?: string } = {},
+): Promise<MessageMeta[]> {
+  const throttle = opts.throttle ?? new Throttle(perSecond)
+  const ids = await listGmailIds(token, limit, { throttle, signal: opts.signal, fetchImpl: opts.fetchImpl, query })
+  return fetchGmailMessages(token, skip ? ids.filter((id) => !skip.has(id)) : ids, { ...opts, throttle })
+}
+
+/** Mailbox address, size and the current history checkpoint. */
+export async function gmailProfile(token: string | TokenFn, fetchImpl: Fetch = fetch, throttle?: Throttle): Promise<{ emailAddress: string; messagesTotal: number; historyId: string }> {
+  return call(`${API}/profile`, await asTokenFn(token)(), fetchImpl, {}, throttle)
+}
+
+export interface GmailChanges {
+  added: string[] // new received messages to fetch
+  removed: string[] // deleted, trashed or marked spam
+  labels: Map<string, { add: string[]; remove: string[] }>
+  historyId: string
+}
+
+interface HistoryRecord {
+  messagesAdded?: { message: { id: string; labelIds?: string[] } }[]
+  messagesDeleted?: { message: { id: string } }[]
+  labelsAdded?: { message: { id: string; labelIds?: string[] }; labelIds: string[] }[]
+  labelsRemoved?: { message: { id: string; labelIds?: string[] }; labelIds: string[] }[]
+}
+
+const HIDDEN = ['SPAM', 'TRASH']
+const NOT_RECEIVED = ['SENT', 'DRAFT', 'CHAT']
+
+/** Fold Gmail history records into what the cache needs to change. */
+export function foldHistory(records: HistoryRecord[], historyId: string): GmailChanges {
+  const added = new Set<string>()
+  const removed = new Set<string>()
+  const labels = new Map<string, { add: string[]; remove: string[] }>()
+  const entry = (id: string) => labels.get(id) ?? labels.set(id, { add: [], remove: [] }).get(id)!
+  for (const r of records) {
+    for (const { message: m } of r.messagesAdded ?? []) {
+      const ls = m.labelIds ?? []
+      if (ls.some((l) => HIDDEN.includes(l) || NOT_RECEIVED.includes(l))) continue
+      added.add(m.id)
+      removed.delete(m.id)
+    }
+    for (const { message: m } of r.messagesDeleted ?? []) {
+      removed.add(m.id)
+      added.delete(m.id)
+    }
+    for (const { message: m, labelIds } of r.labelsAdded ?? []) {
+      if (labelIds.some((l) => HIDDEN.includes(l))) {
+        removed.add(m.id)
+        added.delete(m.id)
+      } else entry(m.id).add.push(...labelIds)
+    }
+    for (const { message: m, labelIds } of r.labelsRemoved ?? []) {
+      // restored from trash or spam: fetch it again
+      if (labelIds.some((l) => HIDDEN.includes(l)) && !(m.labelIds ?? []).some((l) => HIDDEN.includes(l))) {
+        added.add(m.id)
+        removed.delete(m.id)
+      } else entry(m.id).remove.push(...labelIds)
+    }
+  }
+  return { added: [...added], removed: [...removed], labels, historyId }
+}
+
+/** Changes since `startHistoryId`, or null when the checkpoint is too old (do a full sync). */
+export async function gmailChanges(token: string | TokenFn, startHistoryId: string, fetchImpl: Fetch = fetch, throttle?: Throttle): Promise<GmailChanges | null> {
+  const tok = asTokenFn(token)
+  const records: HistoryRecord[] = []
+  let pageToken: string | undefined
+  let historyId = startHistoryId
+  try {
+    do {
+      const url = new URL(`${API}/history`)
+      url.searchParams.set('startHistoryId', startHistoryId)
+      url.searchParams.set('maxResults', '500')
+      for (const t of ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved']) url.searchParams.append('historyTypes', t)
+      if (pageToken) url.searchParams.set('pageToken', pageToken)
+      const page = await call<{ history?: HistoryRecord[]; nextPageToken?: string; historyId?: string }>(url.toString(), await tok(), fetchImpl, {}, throttle)
+      records.push(...(page.history ?? []))
+      historyId = page.historyId ?? historyId
+      pageToken = page.nextPageToken
+    } while (pageToken)
+  } catch (err) {
+    if (err instanceof GmailError && err.status === 404) return null
+    throw err
+  }
+  return foldHistory(records, historyId)
+}
+
+/** Apply folded history to cached headers: drop removed, update labels, add freshly fetched. */
+export function applyChanges(messages: MessageMeta[], changes: GmailChanges, fresh: MessageMeta[]): MessageMeta[] {
+  const gone = new Set([...changes.removed, ...fresh.map((m) => m.id!)])
+  const kept = messages
+    .filter((m) => !m.id || !gone.has(m.id))
+    .map((m) => {
+      const ch = m.id ? changes.labels.get(m.id) : undefined
+      if (!ch) return m
+      const remove = new Set(ch.remove.map((l) => l.toLowerCase()))
+      const labels = m.labels.filter((l) => !remove.has(l))
+      for (const l of ch.add.map((x) => x.toLowerCase())) if (!labels.includes(l)) labels.push(l)
+      // our map reads "unread" vs "opened"
+      if (remove.has('unread') && !labels.includes('opened')) labels.push('opened')
+      if (labels.includes('unread')) return { ...m, labels: labels.filter((l) => l !== 'opened') }
+      return { ...m, labels }
+    })
+  return [...fresh, ...kept]
 }
 
 /* ---------- reading and acting ---------- */
@@ -307,9 +414,24 @@ function base64UrlUtf8(s: string): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-export function gmailMailbox(initialToken: string, clientId: string, fetchImpl: Fetch = fetch, throttle: Throttle = new Throttle(30)): Mailbox {
-  let token = initialToken
-  const api = <T,>(path: string, init?: RequestInit) => call<T>(`${API}${path}`, token, fetchImpl, init, throttle, 0, true)
+export interface GmailMailboxOptions {
+  getToken: TokenFn
+  /** Get a new grant after it expired (runs inside a click handler). */
+  reauth?: () => Promise<void>
+  fetchImpl?: Fetch
+  throttle?: Throttle
+}
+
+export function gmailMailbox({ getToken, reauth, fetchImpl = fetch, throttle = new Throttle(30) }: GmailMailboxOptions): Mailbox {
+  const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    try {
+      return await call<T>(`${API}${path}`, await getToken(), fetchImpl, init, throttle, 0, true)
+    } catch (err) {
+      // the cached token may have just expired: refresh once and retry
+      if (err instanceof AuthExpired) return call<T>(`${API}${path}`, await getToken(true), fetchImpl, init, throttle, 0, true)
+      throw err
+    }
+  }
 
   const partText = async (id: string, part: GmailPart): Promise<string> => {
     let data = part.body?.data
@@ -384,9 +506,7 @@ export function gmailMailbox(initialToken: string, clientId: string, fetchImpl: 
     webUrl(emails) {
       return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(fromQuery(emails))}`
     },
-    async reauth() {
-      token = await requestGmailToken(clientId, '')
-    },
+    reauth,
   }
   return box
 }

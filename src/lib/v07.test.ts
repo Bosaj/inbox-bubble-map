@@ -94,7 +94,7 @@ describe('Gmail mailbox', () => {
         }
       return {}
     }, calls)
-    const box = gmailMailbox('tok', 'client', f)
+    const box = gmailMailbox({ getToken: async () => 'tok', fetchImpl: f })
     const page = await box.list(['s@x.com'], 2)
     expect(page.items[0]).toMatchObject({ id: 'a', subject: 'Deals', unread: true, snippet: 'Hello' })
     expect(calls[0]!.url).toContain(encodeURIComponent('from:(s@x.com)'))
@@ -121,7 +121,7 @@ describe('Gmail mailbox', () => {
   })
 
   it('reports an expired token so the UI can offer to sign in again', async () => {
-    const box = gmailMailbox('tok', 'client', fakeFetch(() => new Response('', { status: 401 })))
+    const box = gmailMailbox({ getToken: async () => 'tok', fetchImpl: fakeFetch(() => new Response('', { status: 401 })) })
     await expect(box.list(['a@x.com'])).rejects.toMatchObject({ code: 'expired' })
   })
 })
