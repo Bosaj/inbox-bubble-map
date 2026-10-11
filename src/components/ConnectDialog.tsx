@@ -15,6 +15,8 @@ export interface ImapForm {
 }
 
 interface Props {
+  /** Google sign-in goes through the server session (stays signed in). */
+  staySignedIn?: boolean
   provider: Provider | null
   onClose: () => void
   onImap: (form: ImapForm) => void
@@ -26,7 +28,7 @@ interface Props {
 
 const LIMITS = [500, 2000, 5000]
 
-export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft, busy, error }: Props) {
+export function ConnectDialog({ staySignedIn, provider, onClose, onImap, onGoogle, onMicrosoft, busy, error }: Props) {
   const { t, lang } = useI18n()
   const ref = useRef<HTMLDialogElement>(null)
   const [email, setEmail] = useState('')
@@ -103,6 +105,7 @@ export function ConnectDialog({ provider, onClose, onImap, onGoogle, onMicrosoft
             <p className="flex items-start gap-2 text-[12.5px] text-ink-3">
               <Lock size={14} className="mt-0.5 shrink-0" />
               {t.oauthNote(provider.id === 'gmail' ? GMAIL_SCOPE.split('/').pop()! : MS_SCOPES.join(', '))}
+              {provider.id === 'gmail' && staySignedIn && <> {t.staySignedInNote}</>}
             </p>
             {provider.id === 'gmail' && (
               <button type="button" onClick={() => setAppPassword(true)} className="text-[13px] font-medium text-accent hover:underline">
