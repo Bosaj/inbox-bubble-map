@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Privacy](https://img.shields.io/badge/privacy-no%20storage%2C%20no%20tracking-4a3aa7)
 
-**Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.7 — read and clean your mail from the map (archive, trash, spam, mark read, one-click unsubscribe), in Arabic, French or English.
+**Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.8 — sign in once and stay signed in; your map opens instantly from this device and only new mail syncs. Read and clean mail from the map, in Arabic, French or English.
 **Author:** Oussama EL HADJI. Part of the Bosaj ideas portfolio (sibling repo: `dual_portfolio_hub`).
 
 <p align="center"><img src="docs/map-logos-dark.webp" alt="Premium dark theme: glossy bubbles with company logos (GitHub, LinkedIn, Medium, Booking.com…) and inbox insights" width="820" /></p>
@@ -56,6 +56,8 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 - **Time range.** 30 days, 90 days, 1 year or everything, measured from your newest message.
 - **Insights.** Share of mail from lists, list emails per week, senders you never open, top-5 concentration, and how many emails a year your cleanup list will save you.
 - **Sender detail.** Messages, unread %, last/first seen, a 12-month activity chart, recent subjects and addresses.
+- **Stay signed in.** Gmail sign-in uses the OAuth code flow with PKCE; the refresh token is sealed into an httpOnly cookie in your browser, and the server stores nothing. Next visit the map opens straight away.
+- **Instant map, incremental sync.** Headers are cached on this device (IndexedDB). On return only what changed is fetched through the Gmail History API (new mail, read state, trash, spam). *Load older mail* reaches further back. *Log out* revokes Google's grant and erases the cache.
 - **Read mail from the map.** The sender panel lists that sender's newest messages. Open one in a reader that blocks remote images and fonts (no tracking pixel ever fires), runs no scripts and opens links in a new tab.
 - **Act on it.** Per message: mark read/unread, archive, trash, spam. Per sender or per selection: *Mark all read*, *Archive all*, *Move all to trash*, *Report spam*, with a confirmation that shows the count. Trash stays recoverable; nothing is ever permanently deleted. Emptied senders pop off the map.
 - **Unsubscribe properly.** One-click RFC 8058 unsubscribe through `/api/unsubscribe` when the sender supports it; otherwise Gmail sends the `mailto:` unsubscribe email for you, or the sender's page opens. *Top cleanup picks* ranks by volume × unread × unsubscribable.
@@ -66,7 +68,8 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 ## Privacy
 
 - The map is built from headers only: From, Date, Subject, List-Unsubscribe(-Post), List-Id, Precedence and read state. A message body is fetched only when you open that message, and your mailbox changes only after you confirm an action.
-- Files, Google sign-in and Microsoft sign-in run **entirely in your browser**. Tokens stay in the tab's memory.
+- Gmail stays signed in through `/api/google/*`: the code exchange runs on the server with PKCE, and the refresh token is sealed with AES-256-GCM into an httpOnly, Secure, SameSite=Lax cookie scoped to `/api/google`. The browser only receives short-lived access tokens and calls the Gmail API directly. Nothing is stored server-side. Without `GOOGLE_CLIENT_SECRET` the app falls back to the popup sign-in for the current tab.
+- The map's headers are cached on this device in IndexedDB so it opens instantly. *Log out* revokes access and deletes the cache. Imported files and IMAP connections are not cached.
 - Browsers can't open IMAP connections, so app-password providers go through `/api/imap`, a Vercel Function. Per request it connects over TLS, does one thing (read headers, list a sender, open one message, or apply one confirmed action), returns and disconnects. Your password stays in the tab and is sent with each request; the relay **never stores or logs** credentials or mail.
 - **Relay hardening.** Port 993/TLS only; public hostnames only (DNS checked, private ranges refused, connection pinned to the checked address); same-origin requests only; 64 KB body limit; strict validation of sender lists and message ids; separate rate limits for full reads and for actions, plus a lockout after failed logins; `Cache-Control: no-store`. Trash and archive use the account's special-use folders (RFC 6154); nothing is expunged.
 - **One-click unsubscribe relay** (`/api/unsubscribe`): POSTs only the standard `List-Unsubscribe=One-Click` body to an https URL from your own headers, on port 443, to a public address it checked and pinned. No cookies, no referrer, no redirects followed, 8-second timeout, rate-limited, nothing logged.
@@ -80,12 +83,16 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 ```
 api/imap.ts             IMAP relay (Vercel Function): headers / list / ids / body (postal-mime) / act; SSRF guard, rate limits, imapflow
 api/unsubscribe.ts      RFC 8058 one-click unsubscribe relay (https only, pinned address, no redirects)
+api/google/*.ts         stay-signed-in Google OAuth: login (PKCE), callback, session (token / log out)
+api/_lib/session.ts     AES-256-GCM sealed cookies, origin checks
 api/logo.ts             company icon proxy (fixed sources, type/size checks, 30-day CDN cache)
 api/_lib/net.ts         shared hostname / private-address guards (not a route)
 src/lib/display.ts      colour modes, filters, selection presets, logo domains, initials
 src/lib/headers.ts      RFC 2047 decoding, From / List-Unsubscribe / Date parsing
 src/lib/mbox.ts         streaming mbox reader (header blocks only, folding, CRLF)
 src/lib/parse.worker.ts Web Worker: File.stream() → parser, progress events
+src/lib/store.ts        IndexedDB cache of a signed-in mailbox (memory fallback)
+src/lib/account.ts      client for the server session (status, tokens, log out)
 src/lib/mailbox.ts      Mailbox interface, reader document (sandbox + CSP), demo mailbox, map updates after actions
 src/lib/gmail.ts        Gmail API client (GIS token, paging, retry), read bodies, batchModify / trash / send
 src/lib/outlook.ts      Microsoft Graph client (MSAL v5, silent refresh), read bodies, JSON $batch moves
@@ -117,7 +124,8 @@ Optional sign-ins: copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID`
 - [x] v0.4 — live physics, any provider (IMAP relay + Outlook), insights, filter exports — [#4](https://github.com/Bosaj/inbox-bubble-map/issues/4), [#7](https://github.com/Bosaj/inbox-bubble-map/issues/7)–[#10](https://github.com/Bosaj/inbox-bubble-map/issues/10)
 - [x] v0.6 — premium design with company logos, colour classes and filters, free placement and group selection — [#12](https://github.com/Bosaj/inbox-bubble-map/issues/12)–[#14](https://github.com/Bosaj/inbox-bubble-map/issues/14)
 - [x] v0.7 — read and act on mail (archive, trash, spam, mark read, bulk clean), one-click unsubscribe, Arabic and French, Google sign-in on — [#5](https://github.com/Bosaj/inbox-bubble-map/issues/5), [#17](https://github.com/Bosaj/inbox-bubble-map/issues/17)–[#20](https://github.com/Bosaj/inbox-bubble-map/issues/20)
-- [ ] Next — Microsoft sign-in client ID; Google verification for public (non-test) Gmail users
+- [x] v0.8 — stay signed in (server OAuth + sealed cookie), on-device cache, incremental Gmail sync, account menu with log out — [#27](https://github.com/Bosaj/inbox-bubble-map/issues/27)
+- [ ] Next — Microsoft sign-in client ID; Google verification for public (non-test) Gmail users (Testing-mode refresh tokens last 7 days)
 
 ---
 
