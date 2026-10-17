@@ -294,3 +294,17 @@ describe('shared Gmail throttle', () => {
     expect(th.perSecond).toBe(30)
   })
 })
+
+describe('email read-aloud', () => {
+  it('speaks plain text in the email’s own language', async () => {
+    const { speakableText, speechLang } = await import('../components/MailUI')
+    expect(speakableText({ html: '<p>Bonjour <b>Salma</b>, voir https://x.example/a</p><style>p{color:red}</style>' })).toBe('Bonjour Salma, voir')
+    expect(speakableText({ text: 'Hi  there\n\nfriend' })).toBe('Hi there friend')
+    expect(speechLang('مرحبا بك في النشرة', 'en')).toBe('ar-MA')
+    expect(speechLang('Votre commande est prête pour vous', 'en')).toBe('fr-FR')
+    expect(speechLang('Your order has shipped and is on the way', 'fr')).toBe('en-US')
+    expect(speechLang('Your order has shipped and is on the way', 'ar')).toBe('en-US')
+    expect(speechLang('12345', 'fr')).toBe('fr-FR')
+    expect(speechLang('Your order has shipped', 'en')).toBe('en-US')
+  })
+})

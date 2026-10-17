@@ -19,6 +19,7 @@ const ar = (n: number, one: string, two: string, few: string, many: string) => (
 
 const en = {
   lang: 'Language',
+  install: 'Install app',
   brand: { before: 'Inbox ', em: 'Bubble', after: ' Map' },
   theme: 'Toggle theme',
   themeName: { system: 'system', light: 'light', dark: 'dark' } as Record<'system' | 'light' | 'dark', string>,
@@ -389,12 +390,15 @@ const en = {
   noContent: 'This email has no content to show.',
   openInGmail: 'Open in Gmail',
   loadingMail: 'Opening…',
+  listen: 'Listen',
+  stopReading: 'Stop',
 }
 
 export type Strings = typeof en
 
 const fr: Strings = {
   lang: 'Langue',
+  install: 'Installer l’app',
   brand: { before: 'Inbox ', em: 'Bubble', after: ' Map' },
   theme: 'Changer de thème',
   themeName: { system: 'système', light: 'clair', dark: 'sombre' },
@@ -744,10 +748,13 @@ const fr: Strings = {
   noContent: 'Ce message n’a pas de contenu à afficher.',
   openInGmail: 'Ouvrir dans Gmail',
   loadingMail: 'Ouverture…',
+  listen: 'Écouter',
+  stopReading: 'Arrêter',
 }
 
 const arS: Strings = {
   lang: 'اللغة',
+  install: 'ثبّت التطبيق',
   brand: { before: 'خريطة ', em: 'فقاعات', after: ' البريد' },
   theme: 'تبديل المظهر',
   themeName: { system: 'النظام', light: 'فاتح', dark: 'داكن' },
@@ -1097,6 +1104,8 @@ const arS: Strings = {
   noContent: 'لا يوجد محتوى لعرضه في هذه الرسالة.',
   openInGmail: 'افتح في Gmail',
   loadingMail: 'جارٍ الفتح…',
+  listen: 'استمع',
+  stopReading: 'إيقاف',
 }
 
 export const STRINGS: Record<Lang, Strings> = { en, fr, ar: arS }
