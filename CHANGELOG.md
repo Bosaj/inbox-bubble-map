@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-17
+### Added
+- Installable app (PWA): web manifest, icons (any + maskable + Apple touch), and a service worker that keeps the app shell available offline. Mail, sign-in and the relays always go to the network (`/api/*` and `redirect.html` are excluded from the navigation fallback). An *Install app* button appears when the browser offers it (Chrome, Edge, Android); iPhone users can use Share → Add to Home Screen. (#31)
+- Listen to an email: the reader's *Listen* button reads the subject and text aloud (HTML, styles and links stripped). The voice is chosen from the email's own language (Arabic script, otherwise French vs English by common words), with a Stop button. In Arabic, French and English. (#31)
+
 ## [0.9.0] - 2026-10-17
 ### Added
 - Whole mailbox, not just the newest 5,000: after the first 2,000 messages appear, the rest loads in the background (every message id is listed, only missing ones are fetched) with a live counter and time estimate. Progress is cached as it goes and resumes on the next visit. *Load all my mail* in the account menu until it is complete. (#29)
