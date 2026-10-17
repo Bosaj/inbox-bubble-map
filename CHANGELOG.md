@@ -4,6 +4,10 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-17
+### Fixed
+- The latin Geist and Instrument Serif fonts are preloaded (a small build plugin adds <link rel=preload> tags for the hashed files), so the start screen's headline no longer reflows when the web font arrives (mobile CLS 0.19).
+
 ## [0.10.0] - 2026-10-17
 ### Added
 - Installable app (PWA): web manifest, icons (any + maskable + Apple touch), and a service worker that keeps the app shell available offline. Mail, sign-in and the relays always go to the network (`/api/*` and `redirect.html` are excluded from the navigation fallback). An *Install app* button appears when the browser offers it (Chrome, Edge, Android); iPhone users can use Share → Add to Home Screen. (#31)

@@ -30,11 +30,30 @@ function devApi(): Plugin {
   }
 }
 
+/**
+ * Preload the latin fonts the first screen uses (Geist + Instrument Serif), so the
+ * headline doesn't reflow when the web font arrives (layout shift on slow phones).
+ */
+function preloadFonts(): Plugin {
+  return {
+    name: 'preload-fonts',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, ctx) {
+        const fonts = Object.keys(ctx.bundle ?? {}).filter((f) => /(geist-latin-wght-normal|instrument-serif-latin-400-(normal|italic))-[\w-]+\.woff2$/.test(f))
+        return { html, tags: fonts.map((f) => ({ tag: 'link', attrs: { rel: 'preload', as: 'font', type: 'font/woff2', href: `/${f}`, crossorigin: '' }, injectTo: 'head' as const })) }
+      },
+    },
+  }
+}
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
     devApi(),
+    preloadFonts(),
     VitePWA({
       registerType: 'autoUpdate',
       pwaAssets: { config: true },
