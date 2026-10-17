@@ -62,6 +62,8 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 - **Read mail from the map.** The sender panel lists that sender's newest messages. Open one in a reader that blocks remote images and fonts (no tracking pixel ever fires), runs no scripts and opens links in a new tab.
 - **Act on it.** Per message: mark read/unread, archive, trash, spam. Per sender or per selection: *Mark all read*, *Archive all*, *Move all to trash*, *Report spam*, with a confirmation that shows the count. Trash stays recoverable; nothing is ever permanently deleted. Emptied senders pop off the map.
 - **Unsubscribe properly.** One-click RFC 8058 unsubscribe through `/api/unsubscribe` when the sender supports it; otherwise Gmail sends the `mailto:` unsubscribe email for you, or the sender's page opens. *Top cleanup picks* ranks by volume × unread × unsubscribable.
+- **Install it like an app.** Add it to your phone's home screen or your desktop (PWA, works offline for the app shell).
+- **Listen to an email.** The reader reads the email aloud in its own language (Arabic, French or English voices).
 - **Arabic, French, English.** A language switcher on every screen, right-to-left layout and an Arabic typeface for Arabic, and local number and date formats.
 - **Exports.** CSV, **Gmail filters** (`.xml`: skip inbox and mark read), **Sieve** rules (Fastmail, Proton, Posteo, cPanel…), and the **map as a PNG**.
 - Search, grouping by company or address, zoom/pan, light/dark/system theme, responsive layout, strict CSP.

@@ -22,7 +22,7 @@ import { CleanupIcon, SenderDetail, SenderList } from './components/SidePanel'
 import { SenderTable } from './components/SenderTable'
 import { Button, Dot, minutes, num, pct, setLocale } from './components/ui'
 import { ConfirmAction, errorText, type BulkAction } from './components/MailUI'
-import { LangSwitch } from './components/LangSwitch'
+import { InstallButton, LangSwitch } from './components/LangSwitch'
 import { I18nContext, initialLang, STRINGS, type Lang } from './i18n'
 
 type Theme = 'system' | 'light' | 'dark'
@@ -831,6 +831,9 @@ export default function App() {
               <RotateCcw size={15} /> <span className="hidden sm:inline">{t.newImport}</span>
             </Button>
           )}
+          <span className="hidden md:inline-flex">
+            <InstallButton />
+          </span>
           <LangSwitch />
           <button type="button" onClick={cycleTheme} aria-label={t.theme} title={`${t.theme}: ${t.themeName[theme]}`} className="press grid size-9 place-items-center rounded-lg text-ink-2 hover:bg-surface-2 hover:text-ink">
             {theme === 'system' ? <SunMoon size={17} /> : theme === 'light' ? <Sun size={17} /> : <Moon size={17} />}

@@ -2,6 +2,7 @@ import { defineConfig, type Plugin } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'node:path'
+import { VitePWA } from 'vite-plugin-pwa'
 
 /** Serve the /api/* Vercel Functions (nested paths too) during `npm run dev`. */
 function devApi(): Plugin {
@@ -30,7 +31,32 @@ function devApi(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), devApi()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    devApi(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      pwaAssets: { config: true },
+      includeAssets: ['favicon.svg'],
+      manifest: {
+        name: 'Inbox Bubble Map',
+        short_name: 'Bubble Map',
+        description: 'See who fills your inbox as a bubble map, then read, unsubscribe, archive or trash in a click. Gmail, Outlook and any IMAP account.',
+        theme_color: '#4a3aa7',
+        background_color: '#f4f2ee',
+        display: 'standalone',
+        start_url: '/',
+        categories: ['productivity', 'utilities'],
+      },
+      workbox: {
+        // the app shell works offline; mail, sign-in and relays always go to the network
+        globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        navigateFallbackDenylist: [/^\/api\//, /^\/redirect\.html/],
+        maximumFileSizeToCacheInBytes: 3_000_000,
+      },
+    }),
+  ],
   worker: { format: 'es' },
   build: {
     rollupOptions: {

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { ChevronDown, FileUp, Lock, LogIn, Sparkles, Trash2 } from 'lucide-react'
 import { PROVIDERS, type Provider } from '../lib/providers'
 import { Button, num } from './ui'
-import { LangSwitch } from './LangSwitch'
+import { InstallButton, LangSwitch } from './LangSwitch'
 import { useI18n } from '../i18n'
 
 export interface Progress {
@@ -62,7 +62,8 @@ export function ImportScreen({ resume, onFiles, onDemo, onProvider, progress, er
         if (files.length) onFiles(files)
       }}
     >
-      <div className="absolute end-4 top-4 z-10 sm:end-6 sm:top-5">
+      <div className="absolute end-4 top-4 z-10 flex items-center gap-2 sm:end-6 sm:top-5">
+        <InstallButton />
         <LangSwitch />
       </div>
       <main className="mx-auto flex min-h-dvh max-w-5xl flex-col justify-center gap-10 px-5 py-12 lg:flex-row lg:items-center lg:gap-16">
