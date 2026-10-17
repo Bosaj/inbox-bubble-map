@@ -96,6 +96,8 @@ export function setLocale(lang: Lang) {
 }
 
 export const currentLocale = () => locale
+/** "12 minutes" / "12 minutes" / "12 دقيقة" with the right plural. */
+export const minutes = (n: number) => new Intl.NumberFormat(locale, { style: 'unit', unit: 'minute', unitDisplay: 'long' }).format(Math.max(1, Math.round(n)))
 export const num = (n: number) => nf.format(n)
 export const pct = (n: number) => pf.format(n)
 

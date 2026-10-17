@@ -6,7 +6,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Privacy](https://img.shields.io/badge/privacy-no%20storage%2C%20no%20tracking-4a3aa7)
 
-**Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.8 — sign in once and stay signed in; your map opens instantly from this device and only new mail syncs. Read and clean mail from the map, in Arabic, French or English.
+**Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.9 — Gmail and Outlook stay signed in, your **whole mailbox** loads in the background (newest first), the map opens instantly from this device and only new mail syncs. Read and clean mail from the map, in Arabic, French or English.
 **Author:** Oussama EL HADJI. Part of the Bosaj ideas portfolio (sibling repo: `dual_portfolio_hub`).
 
 <p align="center"><img src="docs/map-logos-dark.webp" alt="Premium dark theme: glossy bubbles with company logos (GitHub, LinkedIn, Medium, Booking.com…) and inbox insights" width="820" /></p>
@@ -57,6 +57,7 @@ Outlook.com switched off IMAP app passwords in September 2024, which is why Outl
 - **Insights.** Share of mail from lists, list emails per week, senders you never open, top-5 concentration, and how many emails a year your cleanup list will save you.
 - **Sender detail.** Messages, unread %, last/first seen, a 12-month activity chart, recent subjects and addresses.
 - **Stay signed in.** Gmail sign-in uses the OAuth code flow with PKCE; the refresh token is sealed into an httpOnly cookie in your browser, and the server stores nothing. Next visit the map opens straight away.
+- **Your whole mailbox.** The newest 2,000 messages appear in seconds; the rest of the mailbox keeps loading in the background with a live counter and time estimate, saved as it goes, so closing the tab resumes where it stopped. Gmail is paced under its ~50 reads/second limit; Outlook pages through Graph 250 at a time.
 - **Instant map, incremental sync.** Headers are cached on this device (IndexedDB). On return only what changed is fetched through the Gmail History API (new mail, read state, trash, spam). *Load older mail* reaches further back. *Log out* revokes Google's grant and erases the cache.
 - **Read mail from the map.** The sender panel lists that sender's newest messages. Open one in a reader that blocks remote images and fonts (no tracking pixel ever fires), runs no scripts and opens links in a new tab.
 - **Act on it.** Per message: mark read/unread, archive, trash, spam. Per sender or per selection: *Mark all read*, *Archive all*, *Move all to trash*, *Report spam*, with a confirmation that shows the count. Trash stays recoverable; nothing is ever permanently deleted. Emptied senders pop off the map.
@@ -125,7 +126,8 @@ Optional sign-ins: copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID`
 - [x] v0.6 — premium design with company logos, colour classes and filters, free placement and group selection — [#12](https://github.com/Bosaj/inbox-bubble-map/issues/12)–[#14](https://github.com/Bosaj/inbox-bubble-map/issues/14)
 - [x] v0.7 — read and act on mail (archive, trash, spam, mark read, bulk clean), one-click unsubscribe, Arabic and French, Google sign-in on — [#5](https://github.com/Bosaj/inbox-bubble-map/issues/5), [#17](https://github.com/Bosaj/inbox-bubble-map/issues/17)–[#20](https://github.com/Bosaj/inbox-bubble-map/issues/20)
 - [x] v0.8 — stay signed in (server OAuth + sealed cookie), on-device cache, incremental Gmail sync, account menu with log out — [#27](https://github.com/Bosaj/inbox-bubble-map/issues/27)
-- [ ] Next — Microsoft sign-in client ID; Google verification for public (non-test) Gmail users (Testing-mode refresh tokens last 7 days)
+- [x] v0.9 — whole-mailbox backfill, Outlook stays signed in (MSAL localStorage) with the same cache and account menu, Microsoft sign-in switched on — [#22](https://github.com/Bosaj/inbox-bubble-map/issues/22), [#29](https://github.com/Bosaj/inbox-bubble-map/issues/29)
+- [ ] Next — Google verification for public (non-test) Gmail users (Testing-mode refresh tokens last 7 days)
 
 ---
 

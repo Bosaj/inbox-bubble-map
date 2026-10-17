@@ -4,13 +4,13 @@ import { activeFilterCount, NO_FILTERS, passes, selectPreset, type ColorBy, type
 import { DisplayMenu, FiltersMenu, GroupBar, Legend, SelectMenu } from './components/MapControls'
 import { aggregate, CATEGORIES, cleanupScore, inRange, insights, summarize, toCsv, toGmailFilters, toSieve, type Category, type GroupBy } from './lib/aggregate'
 import { fetchViaImap, imapMailbox, type Provider } from './lib/providers'
-import { fetchOutlookMetadata, msClientId, outlookMailbox, requestOutlookToken } from './lib/outlook'
+import { fetchOutlookMetadata, msClientId, outlookLogout, outlookMailbox, requestOutlookToken, resumeOutlook, type TokenSource } from './lib/outlook'
 import { svgToPng } from './lib/exportImage'
 import { ConnectDialog, type ImapForm } from './components/ConnectDialog'
 import { Insights } from './components/Insights'
 import type { MessageMeta } from './lib/headers'
 import { demoMessages } from './lib/demo'
-import { applyChanges, fetchGmailMessages, fetchGmailMetadata, gmailChanges, gmailClientId, gmailMailbox, gmailProfile, requestGmailToken, Throttle, type TokenFn } from './lib/gmail'
+import { applyChanges, fetchGmailMessages, fetchGmailMetadata, gmailChanges, gmailClientId, gmailMailbox, gmailProfile, listGmailIds, requestGmailToken, Throttle, type TokenFn } from './lib/gmail'
 import { googleLogout, googleStatus, serverTokenSource, startGoogleLogin, type GoogleStatus } from './lib/account'
 import { accountId, deleteAccount, lastAccountId, loadAccount, saveAccount, type CachedAccount } from './lib/store'
 import { AccountMenu } from './components/AccountMenu'
@@ -20,7 +20,7 @@ import { ImportScreen, type Progress } from './components/ImportScreen'
 import { BubbleMap } from './components/BubbleMap'
 import { CleanupIcon, SenderDetail, SenderList } from './components/SidePanel'
 import { SenderTable } from './components/SenderTable'
-import { Button, Dot, num, pct, setLocale } from './components/ui'
+import { Button, Dot, minutes, num, pct, setLocale } from './components/ui'
 import { ConfirmAction, errorText, type BulkAction } from './components/MailUI'
 import { LangSwitch } from './components/LangSwitch'
 import { I18nContext, initialLang, STRINGS, type Lang } from './i18n'
@@ -90,14 +90,15 @@ export default function App() {
   const [groupAction, setGroupAction] = useState<{ action: BulkAction; keys: string[] } | null>(null)
   const [groupBusy, setGroupBusy] = useState(false)
   const [groupProgress, setGroupProgress] = useState<string | null>(null)
-  const [stream, setStream] = useState<{ done: number; total: number } | null>(null)
+  const [stream, setStream] = useState<{ done: number; total: number; eta?: number; all?: boolean } | null>(null)
   const streamRef = useRef<AbortController | null>(null)
   /** Signed-in Gmail account (stays signed in through the server session, or this tab only via a popup token). */
-  const [account, setAccount] = useState<{ id: string; email: string; name?: string; mode: 'server' | 'popup'; syncedAt: number } | null>(null)
-  const accountRef = useRef<{ getToken: TokenFn; throttle: Throttle; historyId?: string; limit: number } | null>(null)
+  const [account, setAccount] = useState<{ id: string; kind: 'gmail' | 'outlook'; email: string; name?: string; mode: 'server' | 'popup'; syncedAt: number } | null>(null)
+  const accountRef = useRef<{ getToken: TokenFn; throttle: Throttle; historyId?: string; limit: number; outlookToken?: TokenSource; complete?: boolean } | null>(null)
   const [googleCfg, setGoogleCfg] = useState<GoogleStatus | null>(null)
   const [resume, setResume] = useState<CachedAccount | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [complete, setComplete] = useState(false)
   const [progress, setProgress] = useState<Progress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const worker = useRef<Worker | null>(null)
@@ -223,7 +224,7 @@ export default function App() {
             if (!shown) {
               shown = true
               load(msgs, { kind: 'live', name: 'Gmail', count: msgs.length }, box)
-              setAccount({ id: accountId('gmail', email), email, name, mode, syncedAt: Date.now() })
+              setAccount({ id: accountId('gmail', email), kind: 'gmail', email, name, mode, syncedAt: Date.now() })
               setStream(p)
               setConnecting(false)
             } else setMessages((prev) => (prev ? [...prev, ...msgs] : msgs))
@@ -233,9 +234,10 @@ export default function App() {
         if (!all.length) throw new Error(t.emptyMailbox)
         if (!shown) {
           load(all, { kind: 'live', name: 'Gmail', count: all.length }, box)
-          setAccount({ id: accountId('gmail', email), email, name, mode, syncedAt: Date.now() })
+          setAccount({ id: accountId('gmail', email), kind: 'gmail', email, name, mode, syncedAt: Date.now() })
         }
-        accountRef.current = { getToken, throttle, historyId: profile.historyId, limit }
+        accountRef.current = { getToken, throttle, historyId: profile.historyId, limit, complete: all.length < limit }
+        setComplete(all.length < limit)
         setSource({ kind: 'live', name: 'Gmail', count: all.length })
         await saveAccount({ id: accountId('gmail', email), kind: 'gmail', email, name, historyId: profile.historyId, limit, messages: all, syncedAt: Date.now() })
       } catch (err) {
@@ -292,9 +294,10 @@ export default function App() {
       const cached = await loadAccount(id)
       setResume(null)
       if (cached?.messages.length) {
-        accountRef.current = { getToken, throttle, historyId: cached.historyId, limit: cached.limit }
+        accountRef.current = { getToken, throttle, historyId: cached.historyId, limit: cached.limit, complete: cached.complete }
+        setComplete(Boolean(cached.complete))
         load(cached.messages, { kind: 'live', name: 'Gmail', count: cached.messages.length }, box)
-        setAccount({ id, email, name: name ?? cached.name, mode, syncedAt: cached.syncedAt })
+        setAccount({ id, kind: 'gmail', email, name: name ?? cached.name, mode, syncedAt: cached.syncedAt })
         return
       }
       setConnecting(true)
@@ -306,21 +309,22 @@ export default function App() {
   // background sync right after a cached map opens
   const syncedOnce = useRef<string | null>(null)
   useEffect(() => {
-    if (account && mailbox && syncedOnce.current !== account.id && accountRef.current?.historyId) {
+    if (account?.kind === 'gmail' && mailbox && syncedOnce.current !== account.id && accountRef.current?.historyId) {
       syncedOnce.current = account.id
       void syncGmail(true)
     }
   }, [account, mailbox, syncGmail])
 
-  // keep the on-device cache in step with the map (actions, syncs, older mail)
+  // keep the on-device cache in step with the map (actions, syncs, backfill); while streaming, save after every chunk
+  const streaming = stream !== null
   useEffect(() => {
     if (!account || !messages || !accountRef.current) return
     const ref = accountRef.current
     const id = setTimeout(() => {
-      void saveAccount({ id: account.id, kind: 'gmail', email: account.email, name: account.name, historyId: ref.historyId, limit: ref.limit, messages, syncedAt: account.syncedAt })
-    }, 800)
+      void saveAccount({ id: account.id, kind: account.kind, email: account.email, name: account.name, historyId: ref.historyId, limit: ref.limit, complete: ref.complete, messages, syncedAt: account.syncedAt })
+    }, streaming ? 2000 : 800)
     return () => clearTimeout(id)
-  }, [messages, account])
+  }, [messages, account, streaming])
 
   /** Startup: stay signed in through the server session, or offer to resume a cached account. */
   useEffect(() => {
@@ -342,6 +346,13 @@ export default function App() {
       }
       const last = lastAccountId()
       const cached = last ? await loadAccount(last) : null
+      if (live && cached?.kind === 'outlook' && msClientId) {
+        const session = await resumeOutlook(msClientId).catch(() => null)
+        if (live && session && accountId('outlook', session.email) === cached.id) {
+          await openOutlook(session.email, session.name, session.getToken)
+          return
+        }
+      }
       if (live && cached) setResume(cached)
     })()
     return () => {
@@ -383,39 +394,87 @@ export default function App() {
       }
     : undefined
 
-  /** Fetch the next older messages (beyond what's cached), skipping ones already on the map. */
-  const loadOlder = async () => {
+  /**
+   * Load the whole mailbox in the background: list every message id, then fetch
+   * only the ones not on the map yet. Progress is saved as it goes, so closing
+   * the tab and coming back continues where it stopped.
+   */
+  const backfill = useCallback(async () => {
     const ref = accountRef.current
-    if (!ref || !account || syncing) return
-    setSyncing(true)
-    const limit = ref.limit + 2000
+    const acc = account
+    if (!ref || !acc || ref.complete || syncing) return
+    streamRef.current?.abort()
+    const ctrl = new AbortController()
+    streamRef.current = ctrl
     try {
-      const known = new Set(messagesRef.current.map((m) => m.id).filter((x): x is string => Boolean(x)))
-      const more = await fetchGmailMetadata(ref.getToken, {
-        limit,
-        skip: known,
-        throttle: ref.throttle,
-        onProgress: (p) => setStream(p),
-        onChunk: (msgs) => setMessages((prev) => (prev ? [...prev, ...msgs] : msgs)),
-      })
-      ref.limit = limit
-      setSource({ kind: 'live', name: 'Gmail', count: messagesRef.current.length })
-      setNotice(t.account.olderLoaded(num(more.length)))
+      if (acc.kind === 'outlook' && ref.outlookToken) {
+        const all = await fetchOutlookMetadata(await ref.outlookToken(), { limit: Number.POSITIVE_INFINITY, onProgress: (p) => setStream({ done: p.done, total: 0, all: true }) })
+        if (ctrl.signal.aborted) return
+        setMessages(all)
+        ref.limit = all.length
+      } else {
+        setStream({ done: messagesRef.current.length, total: 0, all: true })
+        const ids = await listGmailIds(ref.getToken, Number.POSITIVE_INFINITY, { throttle: ref.throttle, signal: ctrl.signal })
+        const known = new Set(messagesRef.current.map((m) => m.id).filter((x): x is string => Boolean(x)))
+        const missing = ids.filter((id) => !known.has(id))
+        const started = Date.now()
+        let lastTick = 0
+        await fetchGmailMessages(ref.getToken, missing, {
+          throttle: ref.throttle,
+          signal: ctrl.signal,
+          chunkEvery: 3000,
+          onProgress: (p) => {
+            // re-render at most twice a second, not once per message
+            if (Date.now() - lastTick < 500 && p.done < missing.length) return
+            lastTick = Date.now()
+            const rate = p.done / Math.max(1, (Date.now() - started) / 1000)
+            setStream({ done: ids.length - missing.length + p.done, total: ids.length, eta: p.done > 30 ? (missing.length - p.done) / rate / 60 : undefined, all: true })
+          },
+          onChunk: (msgs) => setMessages((prev) => (prev ? [...prev, ...msgs] : msgs)),
+        })
+        if (ctrl.signal.aborted) return
+        ref.limit = ids.length
+      }
+      ref.complete = true
+      setComplete(true)
+      setSource({ kind: 'live', name: acc.kind === 'outlook' ? 'Outlook' : 'Gmail', count: messagesRef.current.length })
+      setAccount((a) => (a ? { ...a, syncedAt: Date.now() } : a))
+      setNotice(t.account.allLoaded(num(messagesRef.current.length)))
     } catch (err) {
-      setNotice(t.failed(errorText(err, t)))
+      if ((err as Error).name !== 'AbortError' && !ctrl.signal.aborted) setNotice(t.failed(errorText(err, t)))
     } finally {
-      setStream(null)
-      setSyncing(false)
+      if (streamRef.current === ctrl) {
+        streamRef.current = null
+        setStream(null)
+      }
     }
+  }, [account, syncing, t])
+
+  // after the first screen of mail (or a cached map and its sync), keep loading the rest
+  const backfillStarted = useRef<string | null>(null)
+  useEffect(() => {
+    if (!account || !mailbox || syncing || stream || complete || connecting) return
+    if (backfillStarted.current === account.id) return
+    backfillStarted.current = account.id
+    const id = setTimeout(() => void backfill(), 1500)
+    return () => clearTimeout(id)
+  }, [account, mailbox, syncing, stream, complete, connecting, backfill])
+
+  const loadOlder = () => {
+    backfillStarted.current = account?.id ?? null
+    void backfill()
   }
 
   /** Log out: revoke Google's grant, erase this mailbox from the device, back to the start screen. */
   const logout = async () => {
     streamRef.current?.abort()
-    if (account?.mode === 'server') await googleLogout()
+    if (account?.kind === 'outlook' && msClientId) await outlookLogout(msClientId)
+    else if (account?.mode === 'server') await googleLogout()
     if (account) await deleteAccount(account.id)
     accountRef.current = null
     syncedOnce.current = null
+    backfillStarted.current = null
+    setComplete(false)
     setAccount(null)
     setStream(null)
     setMailbox(null)
@@ -423,14 +482,75 @@ export default function App() {
     setGoogleCfg((c) => (c ? { ...c, signedIn: false, email: null, name: null } : c))
   }
 
+  /** Outlook: newest `limit` messages from Graph (fast pages of 250), streamed into the map and cached. */
+  const fetchOutlookInto = useCallback(
+    async (email: string, name: string | undefined, getToken: TokenSource, limit: number, replace: boolean) => {
+      const token = await getToken()
+      const msgs = await fetchOutlookMetadata(token, { limit, onProgress: (p) => (replace ? setStream(p) : setProgress({ label: t.readingOutlook, done: p.done, total: p.total, messages: p.done })) })
+      if (!msgs.length) throw new Error(t.emptyMailbox)
+      const id = accountId('outlook', email)
+      const box = outlookMailbox(getToken)
+      accountRef.current = { getToken: async () => getToken(), throttle: new Throttle(30), limit, outlookToken: getToken, complete: msgs.length < limit }
+      setComplete(msgs.length < limit)
+      if (replace) setMessages(msgs)
+      else load(msgs, { kind: 'live', name: 'Outlook', count: msgs.length }, box)
+      setAccount({ id, kind: 'outlook', email, name, mode: 'server', syncedAt: Date.now() })
+      setSource({ kind: 'live', name: 'Outlook', count: msgs.length })
+      await saveAccount({ id, kind: 'outlook', email, name, limit, messages: msgs, syncedAt: Date.now() })
+      return msgs.length
+    },
+    [load, t],
+  )
+
+  /** Open an Outlook account: cached map first, then a fresh read in the background. */
+  const openOutlook = useCallback(
+    async (email: string, name: string | undefined, getToken: TokenSource) => {
+      const id = accountId('outlook', email)
+      const cached = await loadAccount(id)
+      setResume(null)
+      if (cached?.messages.length) {
+        accountRef.current = { getToken: async () => getToken(), throttle: new Throttle(30), limit: cached.limit, outlookToken: getToken, complete: cached.complete }
+        setComplete(Boolean(cached.complete))
+        load(cached.messages, { kind: 'live', name: 'Outlook', count: cached.messages.length }, outlookMailbox(getToken))
+        setAccount({ id, kind: 'outlook', email, name: name ?? cached.name, mode: 'server', syncedAt: cached.syncedAt })
+        setSyncing(true)
+        try {
+          await fetchOutlookInto(email, name, getToken, cached.limit, true)
+        } catch (err) {
+          setNotice(t.failed(errorText(err, t)))
+        } finally {
+          setSyncing(false)
+          setStream(null)
+        }
+        return
+      }
+      setConnecting(true)
+      try {
+        await fetchOutlookInto(email, name, getToken, 2000, false)
+      } catch (err) {
+        setConnectError(errorText(err, t))
+        setProgress(null)
+      } finally {
+        setConnecting(false)
+      }
+    },
+    [load, fetchOutlookInto, t],
+  )
+
   const onMicrosoft = msClientId
-    ? (limit: number) =>
-        connect('Outlook', async () => {
+    ? async () => {
+        setConnectError(null)
+        setConnecting(true)
+        try {
           setProgress({ label: t.waitMicrosoft, done: 0, total: 1, messages: 0 })
-          const { token, getToken } = await requestOutlookToken(msClientId!)
-          const msgs = await fetchOutlookMetadata(token, { limit, onProgress: (p) => setProgress({ label: t.readingOutlook, done: p.done, total: p.total, messages: p.done }) })
-          return { msgs, box: outlookMailbox(getToken) }
-        })
+          const session = await requestOutlookToken(msClientId!)
+          await openOutlook(session.email, session.name, session.getToken)
+        } catch (err) {
+          setConnectError(errorText(err, t))
+          setProgress(null)
+          setConnecting(false)
+        }
+      }
     : undefined
 
   const onImap = (f: ImapForm) =>
@@ -574,7 +694,7 @@ export default function App() {
               ? {
                   email: resume.email,
                   count: resume.messages.length,
-                  onContinue: () => (googleCfg?.configured ? startGoogleLogin(resume.email) : onGoogle?.(resume.limit, resume.email)),
+                  onContinue: () => (resume.kind === 'outlook' ? onMicrosoft?.() : googleCfg?.configured ? startGoogleLogin(resume.email) : onGoogle?.(resume.limit, resume.email)),
                   onForget: async () => {
                     await deleteAccount(resume.id)
                     setResume(null)
@@ -626,7 +746,7 @@ export default function App() {
                 </span>
               ) : stream ? (
                 <span role="status" className="tabular inline-flex items-center gap-1.5 text-accent">
-                  <span className="inline-block size-2 animate-pulse rounded-full bg-accent" /> {t.loadingMore(num(stream.done), num(stream.total))}
+                  <span className="inline-block size-2 animate-pulse rounded-full bg-accent" /> {stream.all ? t.account.backfill(num(stream.done), stream.total ? num(stream.total) : '', stream.eta ? minutes(stream.eta) : undefined) : t.loadingMore(num(stream.done), num(stream.total))}
                 </span>
               ) : (
                 sourceText
@@ -683,7 +803,19 @@ export default function App() {
             )}
           </div>
           {account ? (
-            <AccountMenu email={account.email} name={account.name} syncedAt={account.syncedAt} staySignedIn={account.mode === 'server'} busy={syncing || Boolean(stream)} onSync={() => void syncGmail()} onOlder={() => void loadOlder()} onLogout={() => void logout()} />
+            <AccountMenu email={account.email} name={account.name} syncedAt={account.syncedAt} staySignedIn={account.mode === 'server'} busy={syncing || Boolean(stream)} complete={complete} onSync={() => {
+                if (account.kind === 'outlook' && accountRef.current?.outlookToken) {
+                  const getToken = accountRef.current.outlookToken
+                  setSyncing(true)
+                  void fetchOutlookInto(account.email, account.name, getToken, accountRef.current.limit, true)
+                    .then(() => setNotice(t.account.upToDate))
+                    .catch((err) => setNotice(t.failed(errorText(err, t))))
+                    .finally(() => {
+                      setSyncing(false)
+                      setStream(null)
+                    })
+                } else void syncGmail()
+              }} onOlder={() => void loadOlder()} onLogout={() => void logout()} />
           ) : (
             <Button
               size="sm"
