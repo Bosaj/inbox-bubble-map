@@ -1,4 +1,18 @@
+import { Download } from 'lucide-react'
 import { LANGS, useI18n } from '../i18n'
+import { useInstallPrompt } from '../lib/install'
+
+/** Installs the web app (home screen / desktop) when the browser supports it. */
+export function InstallButton() {
+  const { t } = useI18n()
+  const install = useInstallPrompt()
+  if (!install) return null
+  return (
+    <button type="button" onClick={() => void install()} className="press glass inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-[13px] font-semibold text-ink hover:border-ink-3">
+      <Download size={14} className="text-accent" /> {t.install}
+    </button>
+  )
+}
 
 /** العربية / FR / EN segmented switch. */
 export function LangSwitch() {

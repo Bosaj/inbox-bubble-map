@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Archive, BellOff, Check, ExternalLink, Inbox, Loader2, Mail, MailCheck, MailOpen, OctagonAlert, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react'
+import { Archive, BellOff, Check, ExternalLink, Inbox, Loader2, Mail, MailCheck, MailOpen, OctagonAlert, RefreshCw, ShieldAlert, ShieldCheck, Square, Trash2, Volume2 } from 'lucide-react'
 import type { Sender } from '../lib/aggregate'
 import { AuthExpired, MailError, parseMailto, readerDocument, type MailAction, type MailItem, type Mailbox, type MailBody } from '../lib/mailbox'
 import { useI18n, type Strings } from '../i18n'
@@ -10,6 +10,27 @@ export const BULK_ACTIONS: BulkAction[] = ['read', 'archive', 'trash', 'spam']
 
 /** Called after the provider confirmed an action, so the map can update. */
 export type OnApplied = (action: MailAction, emails: string[], count: number, ids?: string[]) => void
+
+/** Plain text of an email for read-aloud (HTML stripped, links and whitespace collapsed). */
+export function speakableText(body: MailBody): string {
+  let raw = body.text ?? ''
+  if (!raw.trim()) {
+    const doc = new DOMParser().parseFromString(body.html ?? '', 'text/html')
+    doc.querySelectorAll('style, script, head').forEach((n) => n.remove())
+    raw = doc.body.textContent ?? ''
+  }
+  return raw.replace(/https?:\/\/\S+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 6000)
+}
+
+/** Speech language from the text itself: Arabic script, else French vs English by common words, else the interface language. */
+export function speechLang(text: string, ui: string): string {
+  if (/[؀-ۿ]/.test(text.slice(0, 400))) return 'ar-MA'
+  const head = text.slice(0, 800)
+  const fr = (head.match(/\b(le|la|les|des|vous|votre|pour|avec|est|une|dans|sur)\b/gi) ?? []).length
+  const en = (head.match(/\b(the|and|you|your|for|with|is|are|this|that|our)\b/gi) ?? []).length
+  if (fr || en) return fr > en ? 'fr-FR' : 'en-US'
+  return ui === 'ar' ? 'ar-MA' : ui === 'fr' ? 'fr-FR' : 'en-US'
+}
 
 export function errorText(err: unknown, t: Strings): string {
   if (err instanceof AuthExpired) return t.errors.expired!
@@ -101,7 +122,30 @@ export function ConfirmAction({
 /* ---------- reader ---------- */
 
 function Reader({ mailbox, item, onClose, onApplied, emails }: { mailbox: Mailbox; item: MailItem; onClose: () => void; onApplied: (action: MailAction, item: MailItem) => void; emails: string[] }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const [speaking, setSpeaking] = useState(false)
+  const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window
+  useEffect(() => () => {
+    if (canSpeak) speechSynthesis.cancel()
+  }, [canSpeak])
+  const toggleSpeak = () => {
+    if (!body || !canSpeak) return
+    if (speaking) {
+      speechSynthesis.cancel()
+      setSpeaking(false)
+      return
+    }
+    const text = `${body.subject ?? item.subject}. ${speakableText(body)}`
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = speechLang(text, lang)
+    const voice = speechSynthesis.getVoices().find((v) => v.lang.toLowerCase() === u.lang.toLowerCase()) ?? speechSynthesis.getVoices().find((v) => v.lang.startsWith(u.lang.slice(0, 2)))
+    if (voice) u.voice = voice
+    u.onend = () => setSpeaking(false)
+    u.onerror = () => setSpeaking(false)
+    speechSynthesis.cancel()
+    speechSynthesis.speak(u)
+    setSpeaking(true)
+  }
   const [body, setBody] = useState<MailBody | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState<MailAction | null>(null)
@@ -171,6 +215,11 @@ function Reader({ mailbox, item, onClose, onApplied, emails }: { mailbox: Mailbo
             </Button>
           )
         })}
+        {canSpeak && body && !empty && (
+          <Button size="sm" variant="ghost" onClick={toggleSpeak} aria-pressed={speaking}>
+            {speaking ? <Square size={14} /> : <Volume2 size={14} />} {speaking ? t.stopReading : t.listen}
+          </Button>
+        )}
         {mailbox.webUrl && (
           <a href={mailbox.webUrl(emails)} target="_blank" rel="noreferrer noopener" className="ms-auto inline-flex min-h-9 items-center gap-1 px-2 text-[12.5px] font-medium text-accent hover:underline">
             {mailbox.kind === 'gmail' ? t.openInGmail : t.open} <ExternalLink size={12} />
