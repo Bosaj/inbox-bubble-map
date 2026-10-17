@@ -21,7 +21,7 @@ interface Props {
   onClose: () => void
   onImap: (form: ImapForm) => void
   onGoogle?: (limit: number) => void
-  onMicrosoft?: (limit: number) => void
+  onMicrosoft?: (limit: number) => void | Promise<void>
   busy: boolean
   error: string | null
 }
@@ -86,7 +86,7 @@ export function ConnectDialog({ staySignedIn, provider, onClose, onImap, onGoogl
           </button>
         </div>
 
-        <label className="mb-4 flex items-center justify-between gap-3 text-[13px] text-ink-2">
+        {showForm && <label className="mb-4 flex items-center justify-between gap-3 text-[13px] text-ink-2">
           {t.limit}
           <select value={limit} onChange={(e) => setLimit(Number(e.target.value))} className="min-h-10 rounded-xl border border-line-strong bg-surface px-2 text-[13px] text-ink">
             {LIMITS.map((l) => (
@@ -95,7 +95,7 @@ export function ConnectDialog({ staySignedIn, provider, onClose, onImap, onGoogl
               </option>
             ))}
           </select>
-        </label>
+        </label>}
 
         {oauth && !appPassword && (
           <div className="space-y-3">

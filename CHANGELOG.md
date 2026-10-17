@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Format: [Keep a Changel
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-17
+### Added
+- Whole mailbox, not just the newest 5,000: after the first 2,000 messages appear, the rest loads in the background (every message id is listed, only missing ones are fetched) with a live counter and time estimate. Progress is cached as it goes and resumes on the next visit. *Load all my mail* in the account menu until it is complete. (#29)
+- Outlook stays signed in: MSAL keeps its cache in localStorage, the map is cached on the device like Gmail, opens instantly and refreshes in the background; *Log out* clears the Microsoft session and the cache. (#29)
+- Microsoft sign-in is on: an Entra ID app in the owner's personal directory (personal and work accounts, single-page app redirects, delegated `Mail.ReadWrite`), with `VITE_MS_CLIENT_ID` set in Vercel. (#22)
+
+### Changed
+- The connect dialog only asks how many messages to read for app-password (IMAP) accounts; Google and Microsoft load everything.
+
 ## [0.8.0] - 2026-10-11
 ### Added
 - Stay signed in: Gmail sign-in through `/api/google/login` → `/callback` (OAuth code flow with PKCE). The refresh token is sealed (AES-256-GCM, HKDF key) into an httpOnly, Secure, SameSite=Lax cookie; `/api/google/session` hands out short-lived access tokens and logs out (revokes at Google). Nothing is stored on the server. Falls back to the popup sign-in when `GOOGLE_CLIENT_SECRET` is not set. (#27)

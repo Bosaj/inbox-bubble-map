@@ -133,3 +133,19 @@ describe('on-device cache', () => {
     expect(await loadAccount(id)).toBeNull()
   })
 })
+
+describe('whole-mailbox listing', () => {
+  it('pages through every received message id when the limit is infinite', async () => {
+    const urls: string[] = []
+    const f = (async (url: string) => {
+      urls.push(url)
+      const page = Number(new URL(url).searchParams.get('pageToken') ?? 0)
+      return new Response(JSON.stringify({ messages: Array.from({ length: 500 }, (_, i) => ({ id: `p${page}-${i}` })), nextPageToken: page < 2 ? String(page + 1) : undefined }))
+    }) as unknown as typeof fetch
+    const { listGmailIds, RECEIVED } = await import('./gmail')
+    const ids = await listGmailIds('tok', Number.POSITIVE_INFINITY, { fetchImpl: f })
+    expect(ids).toHaveLength(1500)
+    expect(urls).toHaveLength(3)
+    expect(new URL(urls[0]!).searchParams.get('q')).toBe(RECEIVED)
+  })
+})
