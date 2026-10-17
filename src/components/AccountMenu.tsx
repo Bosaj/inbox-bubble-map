@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { ChevronDown, History, LogOut, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useI18n } from '../i18n'
 import { Popover } from './MapControls'
-import { ago, num } from './ui'
+import { ago } from './ui'
 
-/** Signed-in Gmail account: who, when it last synced, sync, older mail, log out. */
-export function AccountMenu({ email, name, syncedAt, staySignedIn, busy, onSync, onOlder, onLogout }: { email: string; name?: string; syncedAt: number; staySignedIn: boolean; busy: boolean; onSync: () => void; onOlder: () => void; onLogout: () => void }) {
+/** Signed-in account: who, when it last synced, sync, load the whole mailbox, log out. */
+export function AccountMenu({ email, name, syncedAt, staySignedIn, busy, complete, onSync, onOlder, onLogout }: { email: string; name?: string; syncedAt: number; staySignedIn: boolean; busy: boolean; complete: boolean; onSync: () => void; onOlder: () => void; onLogout: () => void }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const initial = (name || email).trim().charAt(0).toUpperCase()
@@ -43,17 +43,19 @@ export function AccountMenu({ email, name, syncedAt, staySignedIn, busy, onSync,
             >
               <RefreshCw size={15} className={`text-accent ${busy ? 'animate-spin' : ''}`} /> {busy ? t.account.syncing : t.account.syncNow}
             </button>
-            <button
-              type="button"
-              className={item}
-              disabled={busy}
-              onClick={() => {
-                setOpen(false)
-                onOlder()
-              }}
-            >
-              <History size={15} className="text-accent" /> {t.account.loadOlder(num(2000))}
-            </button>
+            {!complete && (
+              <button
+                type="button"
+                className={item}
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false)
+                  onOlder()
+                }}
+              >
+                <History size={15} className="text-accent" /> {t.account.loadAll}
+              </button>
+            )}
             <button
               type="button"
               className={item}
