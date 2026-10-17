@@ -8,11 +8,12 @@ import type { MessageMeta } from './headers'
 
 export interface CachedAccount {
   id: string // e.g. "gmail:me@example.com"
-  kind: 'gmail'
+  kind: 'gmail' | 'outlook'
   email: string
   name?: string
   historyId?: string // Gmail history checkpoint for incremental sync
   limit: number // how many of the newest messages the cache covers
+  complete?: boolean // the whole mailbox is cached (background backfill finished)
   messages: MessageMeta[]
   syncedAt: number
 }
@@ -53,7 +54,7 @@ async function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRe
   })
 }
 
-export const accountId = (kind: 'gmail', email: string) => `${kind}:${email.toLowerCase()}`
+export const accountId = (kind: 'gmail' | 'outlook', email: string) => `${kind}:${email.toLowerCase()}`
 
 export async function loadAccount(id: string): Promise<CachedAccount | null> {
   const hit = await tx<CachedAccount>('readonly', (s) => s.get(id) as IDBRequest<CachedAccount>)

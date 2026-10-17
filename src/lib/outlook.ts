@@ -17,37 +17,65 @@ const GRAPH = `${ME}/messages`
 
 export type TokenSource = () => Promise<string>
 
-/** Sign in with a popup and return a token source that refreshes silently. */
-export async function requestOutlookToken(clientId: string): Promise<{ token: string; getToken: TokenSource }> {
-  const { createStandardPublicClientApplication } = await import('@azure/msal-browser')
-  const pca = await createStandardPublicClientApplication({
-    auth: { clientId, authority: 'https://login.microsoftonline.com/common', redirectUri: `${location.origin}/redirect.html` },
-    cache: { cacheLocation: 'sessionStorage' },
-  })
-  let account = pca.getAllAccounts()[0]
-  let token: string | undefined
-  if (account) {
-    try {
-      token = (await pca.acquireTokenSilent({ scopes: MS_SCOPES, account })).accessToken
-    } catch {
-      /* fall through to the popup */
-    }
-  }
-  if (!token) {
-    const result = await pca.loginPopup({ scopes: MS_SCOPES, prompt: 'select_account' })
-    account = result.account ?? undefined
-    token = result.accessToken
-  }
+export interface OutlookSession {
+  token: string
+  getToken: TokenSource
+  email: string
+  name?: string
+}
+
+type Pca = Awaited<ReturnType<typeof import('@azure/msal-browser').createStandardPublicClientApplication>>
+let pcaPromise: Promise<Pca> | null = null
+
+/** One MSAL instance; its cache lives in localStorage so the sign-in survives reloads. */
+function getPca(clientId: string): Promise<Pca> {
+  pcaPromise ??= import('@azure/msal-browser').then(({ createStandardPublicClientApplication }) =>
+    createStandardPublicClientApplication({
+      auth: { clientId, authority: 'https://login.microsoftonline.com/common', redirectUri: `${location.origin}/redirect.html` },
+      cache: { cacheLocation: 'localStorage' },
+    }),
+  )
+  return pcaPromise
+}
+
+function sessionFor(pca: Pca, account: NonNullable<ReturnType<Pca['getAllAccounts']>[number]>, token: string): OutlookSession {
   const getToken: TokenSource = async () => {
-    const acc = account ?? pca.getAllAccounts()[0]
-    if (!acc) throw new AuthExpired()
     try {
-      return (await pca.acquireTokenSilent({ scopes: MS_SCOPES, account: acc })).accessToken
+      return (await pca.acquireTokenSilent({ scopes: MS_SCOPES, account })).accessToken
     } catch {
       throw new AuthExpired()
     }
   }
-  return { token, getToken }
+  return { token, getToken, email: account.username, name: account.name || undefined }
+}
+
+/** Silent resume from MSAL's cache (no popup), or null when a sign-in is needed. */
+export async function resumeOutlook(clientId: string): Promise<OutlookSession | null> {
+  const pca = await getPca(clientId)
+  const account = pca.getAllAccounts()[0]
+  if (!account) return null
+  try {
+    const token = (await pca.acquireTokenSilent({ scopes: MS_SCOPES, account })).accessToken
+    return sessionFor(pca, account, token)
+  } catch {
+    return null
+  }
+}
+
+/** Sign in with a popup (or silently when MSAL still has a session). */
+export async function requestOutlookToken(clientId: string): Promise<OutlookSession> {
+  const resumed = await resumeOutlook(clientId)
+  if (resumed) return resumed
+  const pca = await getPca(clientId)
+  const result = await pca.loginPopup({ scopes: MS_SCOPES, prompt: 'select_account' })
+  if (!result.account) throw new AuthExpired()
+  return sessionFor(pca, result.account, result.accessToken)
+}
+
+/** Forget the Microsoft session in this browser (MSAL cache). */
+export async function outlookLogout(clientId: string): Promise<void> {
+  const pca = await getPca(clientId)
+  await pca.clearCache().catch(() => undefined)
 }
 
 interface GraphMessage {
