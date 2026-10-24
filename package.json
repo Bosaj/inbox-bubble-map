@@ -1,7 +1,7 @@
 {
   "name": "inbox-bubble-map",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.10.1",
   "type": "module",
   "description": "See your inbox as a bubble map of senders, then clean up. Runs entirely in the browser.",
   "author": "Oussama EL HADJI",
