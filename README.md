@@ -7,7 +7,7 @@
 ![Privacy](https://img.shields.io/badge/privacy-no%20storage%2C%20no%20tracking-4a3aa7)
 
 **Live:** https://inbox-bubble-map.vercel.app · **Status:** v0.9 — Gmail and Outlook stay signed in, your **whole mailbox** loads in the background (newest first), the map opens instantly from this device and only new mail syncs. Read and clean mail from the map, in Arabic, French or English.
-**Author:** Oussama EL HADJI. Part of the Bosaj ideas portfolio (sibling repo: `dual_portfolio_hub`).
+**Author:** Oussama Elhadji (`@Bosaj`) <oussousselhadji@gmail.com>.
 
 <p align="center"><img src="docs/map-logos-dark.webp" alt="Premium dark theme: glossy bubbles with company logos (GitHub, LinkedIn, Medium, Booking.com…) and inbox insights" width="820" /></p>
 <p align="center">
@@ -143,6 +143,7 @@ Optional sign-ins: copy `.env.example` to `.env` and set `VITE_GOOGLE_CLIENT_ID`
 
 **Ground rules:** keep this README in sync with reality; write tests for anything correctness-critical; never commit secrets; follow Conventional Commits (see `CONTRIBUTING.md`).
 
-## License
+## 📄 License
+**Proprietary & Commercial Software License** — All Rights Reserved © 2026 Oussama Elhadji (`@Bosaj`) <[oussousselhadji@gmail.com](mailto:oussousselhadji@gmail.com)>.
 
-[MIT](LICENSE) — © 2026 Oussama EL HADJI
+Unauthorized copying, distribution, resale, or reverse engineering is strictly prohibited. See [LICENSE](LICENSE) for full legal terms.
